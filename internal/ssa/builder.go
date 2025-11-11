@@ -24,8 +24,6 @@ func NewBuilder() *Builder {
 	}
 }
 
-// TODO: Реализуйте следующие методы в рамках домашнего задания
-
 // ParseAndBuildSSA парсит исходный код Go и создаёт SSA представление
 // Возвращает SSA программу и функцию по имени
 func (b *Builder) ParseAndBuildSSA(source string, funcName string) (*ssa.Function, error) {
@@ -35,6 +33,7 @@ func (b *Builder) ParseAndBuildSSA(source string, funcName string) (*ssa.Functio
 		return nil, err
 	}
 
+	// 2. Анализ на типы
 	info := &types.Info{
 		Types: make(map[ast.Expr]types.TypeAndValue),
 		Defs:  make(map[*ast.Ident]types.Object),
