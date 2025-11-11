@@ -2,7 +2,12 @@
 package ssa
 
 import (
+	"fmt"
+	"go/ast"
+	"go/importer"
+	"go/parser"
 	"go/token"
+	"go/types"
 
 	"golang.org/x/tools/go/ssa"
 )
@@ -24,17 +29,36 @@ func NewBuilder() *Builder {
 // ParseAndBuildSSA парсит исходный код Go и создаёт SSA представление
 // Возвращает SSA программу и функцию по имени
 func (b *Builder) ParseAndBuildSSA(source string, funcName string) (*ssa.Function, error) {
-	// TODO: Реализовать
-	// Шаги:
 	// 1. Парсинг исходного кода с помощью go/parser
-	// 2. Создание SSA программы
-	// 3. Поиск нужной функции по имени
+	f, err := parser.ParseFile(b.fset, "", source, parser.ParseComments)
+	if err != nil {
+		return nil, err
+	}
 
-	// Подсказки:
-	// - Используйте parser.ParseFile для парсинга
-	// - Создайте packages.Config и загрузите пакет
-	// - Используйте ssautil.CreateProgram для создания SSA
-	// - Найдите функцию в SSA программе
+	info := &types.Info{
+		Types: make(map[ast.Expr]types.TypeAndValue),
+		Defs:  make(map[*ast.Ident]types.Object),
+		Uses:  make(map[*ast.Ident]types.Object),
+	}
+	conf := &types.Config{
+		Importer: importer.Default(),
+	}
 
-	panic("не реализовано")
+	pkg, err := conf.Check("main", b.fset, []*ast.File{f}, info)
+	if err != nil {
+		return nil, fmt.Errorf("type check error: %w", err)
+	}
+
+	// 3. Создание SSA-программы
+	prog := ssa.NewProgram(b.fset, ssa.SanityCheckFunctions)
+	ssaPkg := prog.CreatePackage(pkg, []*ast.File{f}, info, true)
+	prog.Build()
+
+	// 4. Поиск нужной функции по имени
+	fn := ssaPkg.Func(funcName)
+	if fn == nil {
+		return nil, fmt.Errorf("function %q not found in package", funcName)
+	}
+
+	return fn, err
 }
