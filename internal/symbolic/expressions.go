@@ -3,6 +3,7 @@ package symbolic
 
 import (
 	"fmt"
+	"strings"
 )
 
 // SymbolicExpression - базовый интерфейс для всех символьных выражений
@@ -153,13 +154,29 @@ type LogicalOperation struct {
 	Operator LogicalOperator
 }
 
-// TODO: Реализуйте следующие методы в рамках домашнего задания
-
-// NewLogicalOperation создаёт новую логическую операцию
 func NewLogicalOperation(operands []SymbolicExpression, op LogicalOperator) *LogicalOperation {
-	// TODO: Реализовать
-	// Создать логическую операцию и проверить типы операндов
-	panic("не реализовано")
+	for _, o := range operands {
+		if o.Type() != BoolType {
+			panic("logical operation expects bool operands")
+		}
+	}
+	switch op {
+	case NOT:
+		if len(operands) != 1 {
+			panic("NOT expects 1 operand")
+		}
+	case IMPLIES:
+		if len(operands) != 2 {
+			panic("IMPLIES expects 2 operands")
+		}
+	case AND, OR:
+		if len(operands) < 2 {
+			panic("AND/OR expect at least 2 operands")
+		}
+	default:
+		panic("unknown logical operator")
+	}
+	return &LogicalOperation{Operands: operands, Operator: op}
 }
 
 // Type возвращает тип логической операции (всегда bool)
@@ -169,11 +186,23 @@ func (lo *LogicalOperation) Type() ExpressionType {
 
 // String возвращает строковое представление логической операции
 func (lo *LogicalOperation) String() string {
-	// TODO: Реализовать
-	// Для NOT: "!operand"
-	// Для AND/OR: "(operand1 && operand2 && ...)"
-	// Для IMPLIES: "(operand1 => operand2)"
-	panic("не реализовано")
+	switch lo.Operator {
+	case NOT:
+		return fmt.Sprintf("!%s", lo.Operands[0].String())
+	case IMPLIES:
+		return fmt.Sprintf("(%s => %s)", lo.Operands[0].String(), lo.Operands[1].String())
+	default:
+		if len(lo.Operands) < 2 {
+			panic("AND/OR expect at least 2 operand")
+		}
+
+		parts := make([]string, len(lo.Operands))
+		for i, op := range lo.Operands {
+			parts[i] = op.String()
+		}
+		sep := " " + lo.Operator.String() + " " // " && " или " || "
+		return "(" + strings.Join(parts, sep) + ")"
+	}
 }
 
 // Accept реализует Visitor pattern
