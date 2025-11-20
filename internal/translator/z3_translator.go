@@ -313,6 +313,42 @@ func (zt *Z3Translator) VisitFunctionCall(expr *symbolic.FunctionCall) interface
 	// Apply creates a Value representing the result of applying f to args
 	return fd.Apply(argVals...)
 }
+
+func (zt *Z3Translator) VisitConditionalExpression(expr *symbolic.ConditionalExpression) interface{} {
+	ift, err := zt.TranslateExpression(expr.IfOperand)
+	if err != nil {
+		panic("VisitConditionalExpression: translation IfOperand error")
+	}
+	thent, err := zt.TranslateExpression(expr.ThenOperand)
+	if err != nil {
+		panic("VisitConditionalExpression: translation ThenOperand error")
+	}
+	elset, err := zt.TranslateExpression(expr.ElseOperand)
+	if err != nil {
+		panic("VisitConditionalExpression: translation ElseOperand error")
+	}
+
+	ifb, ok := ift.(z3.Bool)
+	if !ok {
+		panic("VisitConditionalExpression: expected boolean IfOperand operand")
+	}
+
+	if theni, ok := thent.(z3.Int); ok {
+		elsei, ok := elset.(z3.Int)
+		if !ok {
+			panic("VisitConditionalExpression: then/else must both be Int or both be Bool")
+		}
+		return ifb.IfThenElse(theni, elsei)
+	}
+	if thenb, ok := thent.(z3.Bool); ok {
+		elseb, ok := elset.(z3.Bool)
+		if !ok {
+			panic("VisitConditionalExpression: then/else must both be Int or both be Bool")
+		}
+		return ifb.IfThenElse(thenb, elseb)
+	}
+	panic("VisitConditionalExpression: unsupported branch type (only Int/Bool supported)")
+}
 }
 
 // Вспомогательные методы
