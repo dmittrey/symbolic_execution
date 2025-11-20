@@ -25,6 +25,7 @@ type ExpressionTranslator interface {
 	VisitBoolConstant(expr *symbolic.BoolConstant) (interface{}, error)
 	VisitBinaryOperation(expr *symbolic.BinaryOperation) (interface{}, error)
 	VisitLogicalOperation(expr *symbolic.LogicalOperation) (interface{}, error)
+	VisitFunctionCall(expr *symbolic.FunctionCall) (interface{}, error)
 }
 
 // TranslationError представляет ошибку трансляции

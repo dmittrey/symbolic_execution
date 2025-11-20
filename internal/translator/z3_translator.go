@@ -262,6 +262,57 @@ func (zt *Z3Translator) VisitLogicalOperation(expr *symbolic.LogicalOperation) i
 		panic("Not impl.")
 	}
 }
+
+func (zt *Z3Translator) VisitFunctionCall(expr *symbolic.FunctionCall) interface{} {
+	// 1) Переводим аргументы в Z3
+	argVals := make([]z3.Value, len(expr.Args))
+	for i, a := range expr.Args {
+		v, err := zt.TranslateExpression(a)
+		if err != nil {
+			panic(fmt.Sprintf("VisitFunctionCall(%s): translate arg %d: %v", expr.Name, i, err))
+		}
+		switch vv := v.(type) {
+		case z3.Int:
+			argVals[i] = z3.Value(vv)
+		case z3.Bool:
+			argVals[i] = z3.Value(vv)
+		case z3.Value:
+			argVals[i] = vv
+		default:
+			panic(fmt.Sprintf("VisitFunctionCall(%s): unsupported arg %d type %T", expr.Name, i, v))
+		}
+	}
+
+	// 2) Формируем доменные сорта из типов аргументов
+	domain := make([]z3.Sort, len(expr.Args))
+	for i, a := range expr.Args {
+		switch a.Type() {
+		case symbolic.IntType:
+			domain[i] = zt.ctx.IntSort()
+		case symbolic.BoolType:
+			domain[i] = zt.ctx.BoolSort()
+		default:
+			panic(fmt.Sprintf("VisitFunctionCall(%s): unsupported arg sort #%d (%v)", expr.Name, i, a.Type()))
+		}
+	}
+
+	// 3) Результирующий сорт по RetType
+	var rng z3.Sort
+	switch expr.RetType {
+	case symbolic.IntType:
+		rng = zt.ctx.IntSort()
+	case symbolic.BoolType:
+		rng = zt.ctx.BoolSort()
+	default:
+		panic(fmt.Sprintf("VisitFunctionCall(%s): unsupported return type %v", expr.Name, expr.RetType))
+	}
+
+	// 4) Объявляем uninterpreted function и делаем аппликацию
+	fd := zt.ctx.FuncDecl(expr.Name, domain, rng)
+
+	// Apply creates a Value representing the result of applying f to args
+	return fd.Apply(argVals...)
+}
 }
 
 // Вспомогательные методы

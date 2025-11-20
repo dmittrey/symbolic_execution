@@ -210,6 +210,37 @@ func (lo *LogicalOperation) Accept(visitor Visitor) interface{} {
 	return visitor.VisitLogicalOperation(lo)
 }
 
+// - FunctionCall (вызовы функций: f(x, y))
+type FunctionCall struct {
+	Name    string
+	Args    []SymbolicExpression
+	RetType ExpressionType
+}
+
+func NewFunctionCall(name string, args []SymbolicExpression, retType ExpressionType) *FunctionCall {
+	return &FunctionCall{
+		Name:    name,
+		Args:    args,
+		RetType: retType,
+	}
+}
+
+func (fc *FunctionCall) Type() ExpressionType {
+	return fc.RetType
+}
+
+func (fc *FunctionCall) String() string {
+	parts := make([]string, len(fc.Args))
+	for i, a := range fc.Args {
+		parts[i] = a.String()
+	}
+	return "(" + "fn " + fc.Name + ": (" + strings.Join(parts, " -> ") + " -> " + fc.RetType.String() + "))"
+}
+
+func (fc *FunctionCall) Accept(visitor Visitor) interface{} {
+	return visitor.VisitFunctionCall(fc)
+}
+
 // Операторы для бинарных выражений
 type BinaryOperator int
 
@@ -305,5 +336,4 @@ func (ref *Ref) Accept(visitor Visitor) interface{} {
 // TODO: Добавьте дополнительные типы выражений по необходимости:
 // - UnaryOperation (унарные операции: -x, !x)
 // - ArrayAccess (доступ к элементам массива: arr[index])
-// - FunctionCall (вызовы функций: f(x, y))
 // - ConditionalExpression (тернарный оператор: condition ? true_expr : false_expr)
