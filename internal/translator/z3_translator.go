@@ -3,6 +3,7 @@ package translator
 
 import (
 	"fmt"
+	"math/big"
 	"strconv"
 	"symbolic-execution-course/internal/symbolic"
 
@@ -129,10 +130,7 @@ func (zt *Z3Translator) VisitVariable(expr *symbolic.SymbolicVariable) interface
 
 // VisitIntConstant транслирует целочисленную константу в Z3
 func (zt *Z3Translator) VisitIntConstant(expr *symbolic.IntConstant) interface{} {
-	// TODO: Реализовать
-	// Создать Z3 константу с помощью zt.ctx.FromBigInt или аналогичного метода
-
-	panic("не реализовано")
+	return zt.ctx.FromBigInt(big.NewInt(expr.Value), zt.ctx.IntSort())
 }
 
 // VisitBoolConstant транслирует булеву константу в Z3
