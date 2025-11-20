@@ -135,10 +135,7 @@ func (zt *Z3Translator) VisitIntConstant(expr *symbolic.IntConstant) interface{}
 
 // VisitBoolConstant транслирует булеву константу в Z3
 func (zt *Z3Translator) VisitBoolConstant(expr *symbolic.BoolConstant) interface{} {
-	// TODO: Реализовать
-	// Использовать zt.ctx.FromBool для создания Z3 булевой константы
-
-	panic("не реализовано")
+	return zt.ctx.FromBool(expr.Value)
 }
 
 // VisitBinaryOperation транслирует бинарную операцию в Z3
