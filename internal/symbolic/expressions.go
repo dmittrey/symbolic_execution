@@ -1,7 +1,9 @@
 // Package symbolic содержит конкретные реализации символьных выражений
 package symbolic
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // SymbolicExpression - базовый интерфейс для всех символьных выражений
 type SymbolicExpression interface {
@@ -101,28 +103,43 @@ type BinaryOperation struct {
 	Operator BinaryOperator
 }
 
-// TODO: Реализуйте следующие методы в рамках домашнего задания
-
 // NewBinaryOperation создаёт новую бинарную операцию
 func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *BinaryOperation {
-	// TODO: Реализовать
-	// Создать новую бинарную операцию и проверить совместимость типов
-	panic("не реализовано")
+	lt, rt := left.Type(), right.Type()
+
+	switch {
+	case lt == IntType && rt == IntType:
+		return &BinaryOperation{Left: left, Right: right, Operator: op}
+
+	case lt == BoolType && rt == BoolType && (op == EQ || op == NE):
+		return &BinaryOperation{Left: left, Right: right, Operator: op}
+
+	case lt == ArrayType && rt == ArrayType && (op == EQ || op == NE):
+		return &BinaryOperation{Left: left, Right: right, Operator: op}
+
+	default:
+		panic(fmt.Errorf("binary op %v not supported for %v and %v", op, lt, rt))
+	}
 }
 
-// Type возвращает результирующий тип операции
 func (bo *BinaryOperation) Type() ExpressionType {
-	// TODO: Реализовать
-	// Определить результирующий тип на основе операции и типов операндов
-	// Например: int + int = int, int < int = bool
-	panic("не реализовано")
+	switch bo.Operator {
+	case EQ, NE, LT, LE, GT, GE:
+		return BoolType
+	case ADD, SUB, MUL, DIV, MOD:
+		return IntType
+	default:
+		panic("unknown operator")
+	}
 }
 
 // String возвращает строковое представление операции
 func (bo *BinaryOperation) String() string {
-	// TODO: Реализовать
-	// Формат: "(left operator right)"
-	panic("не реализовано")
+	return fmt.Sprintf("(%s %s %s)",
+		bo.Left.String(),
+		bo.Operator.String(),
+		bo.Right.String(),
+	)
 }
 
 // Accept реализует Visitor pattern

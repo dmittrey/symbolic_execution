@@ -140,16 +140,91 @@ func (zt *Z3Translator) VisitBoolConstant(expr *symbolic.BoolConstant) interface
 
 // VisitBinaryOperation транслирует бинарную операцию в Z3
 func (zt *Z3Translator) VisitBinaryOperation(expr *symbolic.BinaryOperation) interface{} {
-	// TODO: Реализовать
-	// 1. Транслировать левый и правый операнды
-	// 2. В зависимости от оператора создать соответствующую Z3 операцию
+	leftZ3, err := zt.TranslateExpression(expr.Left)
+	if err != nil {
+		panic("VisitBinaryOperation: Unable to translate left operand.")
+	}
 
-	// Подсказки по операциям в Z3:
-	// - Арифметические: left.Add(right), left.Sub(right), left.Mul(right), left.Div(right)
-	// - Сравнения: left.Eq(right), left.LT(right), left.LE(right), etc.
-	// - Приводите типы: left.(z3.Int), right.(z3.Int) для int операций
+	rightZ3, err := zt.TranslateExpression(expr.Right)
+	if err != nil {
+		panic("VisitBinaryOperation: Unable to translate right operand.")
+	}
 
-	panic("не реализовано")
+	if leftZ3i, ok := leftZ3.(z3.Int); ok {
+		rightZ3i, ok := rightZ3.(z3.Int)
+		if !ok {
+			panic("VisitBinaryOperation: both operands must be Int")
+		}
+
+		switch expr.Operator {
+		// Арифметические операторы
+		case symbolic.ADD:
+			return leftZ3i.Add(rightZ3i)
+		case symbolic.SUB:
+			return leftZ3i.Sub(rightZ3i)
+		case symbolic.MUL:
+			return leftZ3i.Mul(rightZ3i)
+		case symbolic.DIV:
+			return leftZ3i.Div(rightZ3i)
+		case symbolic.MOD:
+			return leftZ3i.Mod(rightZ3i)
+
+		// Операторы сравнения
+		case symbolic.EQ:
+			return leftZ3i.Eq(rightZ3i)
+		case symbolic.NE:
+			return leftZ3i.NE(rightZ3i)
+		case symbolic.LT:
+			return leftZ3i.LT(rightZ3i)
+		case symbolic.LE:
+			return leftZ3i.LE(rightZ3i)
+		case symbolic.GT:
+			return leftZ3i.GT(rightZ3i)
+		case symbolic.GE:
+			return leftZ3i.GE(rightZ3i)
+
+		default:
+			panic("Not impl.")
+		}
+	}
+
+	if leftZ3b, ok := leftZ3.(z3.Bool); ok {
+		rightZ3b, ok := rightZ3.(z3.Bool)
+		if !ok {
+			panic("VisitBinaryOperation: both operands must be Bool")
+		}
+
+		switch expr.Operator {
+		// Операторы сравнения
+		case symbolic.EQ:
+			return leftZ3b.Eq(rightZ3b)
+		case symbolic.NE:
+			return leftZ3b.NE(rightZ3b)
+
+		default:
+			panic("Not impl.")
+		}
+	}
+
+	if leftZ3a, ok := leftZ3.(z3.Array); ok {
+		rightZ3a, ok := rightZ3.(z3.Array)
+		if !ok {
+			panic("VisitBinaryOperation: both operands must be Array")
+		}
+
+		switch expr.Operator {
+		// Операторы сравнения
+		case symbolic.EQ:
+			return leftZ3a.Eq(rightZ3a)
+		case symbolic.NE:
+			return leftZ3a.NE(rightZ3a)
+
+		default:
+			panic("Not impl.")
+		}
+	}
+
+	panic("Not impl type.")
 }
 
 // VisitLogicalOperation транслирует логическую операцию в Z3
