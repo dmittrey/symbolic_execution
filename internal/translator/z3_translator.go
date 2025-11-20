@@ -229,17 +229,39 @@ func (zt *Z3Translator) VisitBinaryOperation(expr *symbolic.BinaryOperation) int
 
 // VisitLogicalOperation транслирует логическую операцию в Z3
 func (zt *Z3Translator) VisitLogicalOperation(expr *symbolic.LogicalOperation) interface{} {
-	// TODO: Реализовать
-	// 1. Транслировать все операнды
-	// 2. Применить соответствующую логическую операцию
+	ops := make([]z3.Bool, 0, len(expr.Operands))
+	for _, opnd := range expr.Operands {
+		v, err := zt.TranslateExpression(opnd)
+		if err != nil {
+			panic("VisitLogicalOperation: translation error")
+		}
+		b, ok := v.(z3.Bool)
+		if !ok {
+			panic("VisitLogicalOperation: expected boolean operand")
+		}
+		ops = append(ops, b)
+	}
 
-	// Подсказки:
-	// - AND: zt.ctx.And(operands...)
-	// - OR: zt.ctx.Or(operands...)
-	// - NOT: operand.Not() (для единственного операнда)
-	// - IMPLIES: antecedent.Implies(consequent)
+	switch expr.Operator {
+	case symbolic.AND:
+		return ops[0].And(ops[1:]...)
+	case symbolic.OR:
+		return ops[0].Or(ops[1:]...)
+	case symbolic.NOT:
+		if len(ops) != 1 {
+			panic("NOT expects 1 operand")
+		}
+		return ops[0].Not()
+	case symbolic.IMPLIES:
+		if len(ops) != 2 {
+			panic("IMPLIES expects 2 operands")
+		}
+		return ops[0].Implies(ops[1])
 
-	panic("не реализовано")
+	default:
+		panic("Not impl.")
+	}
+}
 }
 
 // Вспомогательные методы
