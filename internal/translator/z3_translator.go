@@ -349,6 +349,77 @@ func (zt *Z3Translator) VisitConditionalExpression(expr *symbolic.ConditionalExp
 	}
 	panic("VisitConditionalExpression: unsupported branch type (only Int/Bool supported)")
 }
+
+func (zt *Z3Translator) VisitArray(expr *symbolic.Array) interface{} {
+	// Индексный сорт — Int (если так задумано)
+	idx := zt.ctx.IntSort()
+
+	// Сорт элементов
+	var elem z3.Sort
+	switch expr.ValType {
+	case symbolic.IntType:
+		elem = zt.ctx.IntSort()
+	case symbolic.BoolType:
+		elem = zt.ctx.BoolSort()
+	default:
+		panic("VisitArray: unsupported element type")
+	}
+
+	// Сорт массива и символьная константа этого сорта
+	arrSort := zt.ctx.ArraySort(idx, elem)
+	return zt.ctx.Const(expr.Name, arrSort) // <- символьный массив, НЕ ConstArray
+}
+
+func (zt *Z3Translator) VisitArrayAccess(expr *symbolic.ArrayAccess) interface{} {
+	arrV, err := zt.TranslateExpression(expr.Arr)
+	if err != nil {
+		panic("VisitArrayAccess: translate Arr: " + err.Error())
+	}
+	idxV, err := zt.TranslateExpression(expr.Idx)
+	if err != nil {
+		panic("VisitArrayAccess: translate Idx: " + err.Error())
+	}
+
+	arr, ok := arrV.(z3.Array)
+	if !ok {
+		panic("VisitArrayAccess: Arr is not z3.Array")
+	}
+	idx, ok := idxV.(z3.Value)
+	if !ok {
+		panic("VisitArrayAccess: Idx is not z3.Value")
+	}
+
+	return arr.Select(idx)
+}
+
+func (zt *Z3Translator) VisitArrayStore(expr *symbolic.ArrayStore) interface{} {
+	arrV, err := zt.TranslateExpression(expr.Arr)
+	if err != nil {
+		panic("VisitArrayStore: translate Arr: " + err.Error())
+	}
+	idxV, err := zt.TranslateExpression(expr.Idx)
+	if err != nil {
+		panic("VisitArrayStore: translate Idx: " + err.Error())
+	}
+	valV, err := zt.TranslateExpression(expr.Val)
+	if err != nil {
+		panic("VisitArrayStore: translate Val: " + err.Error())
+	}
+
+	arr, ok := arrV.(z3.Array)
+	if !ok {
+		panic("VisitArrayStore: Arr is not z3.Array")
+	}
+	idx, ok := idxV.(z3.Value)
+	if !ok {
+		panic("VisitArrayStore: Idx is not z3.Value")
+	}
+	val, ok := valV.(z3.Value)
+	if !ok {
+		panic("VisitArrayStore: Val is not z3.Value")
+	}
+
+	return arr.Store(idx, val)
 }
 
 // Вспомогательные методы

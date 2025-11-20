@@ -9,4 +9,7 @@ type Visitor interface {
 	VisitLogicalOperation(expr *LogicalOperation) interface{}
 	VisitFunctionCall(expr *FunctionCall) interface{}
 	VisitConditionalExpression(expr *ConditionalExpression) interface{}
+	VisitArray(expr *Array) interface{}
+	VisitArrayAccess(expr *ArrayAccess) interface{}
+	VisitArrayStore(expr *ArrayStore) interface{}
 }

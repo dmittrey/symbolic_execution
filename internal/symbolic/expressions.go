@@ -275,6 +275,90 @@ func (ce *ConditionalExpression) Accept(visitor Visitor) interface{} {
 	return visitor.VisitConditionalExpression(ce)
 }
 
+type Array struct {
+	Name    string
+	ValType ExpressionType
+}
+
+func NewArray(name string, valType ExpressionType) *Array {
+	if valType != IntType && valType != BoolType {
+		panic(fmt.Sprintf("Unexpected type %s", valType.String()))
+	}
+
+	return &Array{
+		Name:    name,
+		ValType: valType,
+	}
+}
+
+func (expr *Array) Type() ExpressionType {
+	return ArrayType
+}
+
+func (expr *Array) String() string {
+	return expr.Name + "[" + "]"
+}
+
+func (expr *Array) Accept(visitor Visitor) interface{} {
+	return visitor.VisitArray(expr)
+}
+
+// ArrayAccess (доступ к элементам массива: arr[index])
+type ArrayAccess struct {
+	Arr *Array
+	Idx SymbolicExpression
+}
+
+func NewArrayAccess(array *Array, idx SymbolicExpression) *ArrayAccess {
+	if idx.Type() != IntType {
+		panic("Array index must be Int")
+	}
+	return &ArrayAccess{Arr: array, Idx: idx}
+}
+
+func (expr *ArrayAccess) Type() ExpressionType {
+	switch expr.Arr.ValType {
+	case IntType, BoolType:
+		return expr.Arr.ValType
+	default:
+		panic("unsupported array element type")
+	}
+}
+
+func (expr *ArrayAccess) String() string {
+	return expr.Arr.Name + "[" + expr.Idx.String() + "]"
+}
+
+func (expr *ArrayAccess) Accept(visitor Visitor) interface{} {
+	return visitor.VisitArrayAccess(expr)
+}
+
+type ArrayStore struct {
+	Arr *Array
+	Idx SymbolicExpression
+	Val SymbolicExpression
+}
+
+func NewArrayStore(array *Array, idx SymbolicExpression, val SymbolicExpression) *ArrayStore {
+	return &ArrayStore{
+		Arr: array,
+		Idx: idx,
+		Val: val,
+	}
+}
+
+func (expr *ArrayStore) Type() ExpressionType {
+	return ArrayType
+}
+
+func (expr *ArrayStore) String() string {
+	return "store(" + expr.Arr.Name + ", " + expr.Idx.String() + ", " + expr.Val.String() + ")"
+}
+
+func (expr *ArrayStore) Accept(visitor Visitor) interface{} {
+	return visitor.VisitArrayStore(expr)
+}
+
 // Операторы для бинарных выражений
 type BinaryOperator int
 
@@ -366,7 +450,3 @@ func (ref *Ref) String() string {
 func (ref *Ref) Accept(visitor Visitor) interface{} {
 	panic("не реализовано")
 }
-
-// TODO: Добавьте дополнительные типы выражений по необходимости:
-// - UnaryOperation (унарные операции: -x, !x)
-// - ArrayAccess (доступ к элементам массива: arr[index])
