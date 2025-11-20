@@ -115,21 +115,16 @@ func (zt *Z3Translator) TranslateExpression(expr symbolic.SymbolicExpression) (i
 	return expr.Accept(zt), nil
 }
 
-// TODO: Реализуйте следующие методы в рамках домашнего задания
-
 // VisitVariable транслирует символьную переменную в Z3
 func (zt *Z3Translator) VisitVariable(expr *symbolic.SymbolicVariable) interface{} {
-	// TODO: Реализовать
-	// Проверить, есть ли переменная в кэше
-	// Если нет - создать новую Z3 переменную соответствующего типа
-	// Добавить в кэш и вернуть
+	if z3CacheVar, ok := zt.vars[expr.Name]; ok {
+		return z3CacheVar
+	}
 
-	// Подсказки:
-	// - Используйте zt.ctx.IntConst(name) для int переменных
-	// - Используйте zt.ctx.BoolConst(name) для bool переменных
-	// - Храните переменные в zt.vars для повторного использования
-
-	panic("не реализовано")
+	// Нету в кэше
+	z3Var := zt.createZ3Variable(expr.Name, expr.ExprType)
+	zt.vars[expr.Name] = z3Var
+	return z3Var
 }
 
 // VisitIntConstant транслирует целочисленную константу в Z3
@@ -181,14 +176,12 @@ func (zt *Z3Translator) VisitLogicalOperation(expr *symbolic.LogicalOperation) i
 
 // createZ3Variable создаёт Z3 переменную соответствующего типа
 func (zt *Z3Translator) createZ3Variable(name string, exprType symbolic.ExpressionType) z3.Value {
-	// TODO: Реализовать (вспомогательный метод)
-	// Создать Z3 переменную на основе типа
-	panic("не реализовано")
-}
-
-// castToZ3Type приводит значение к нужному Z3 типу
-func (zt *Z3Translator) castToZ3Type(value interface{}, targetType symbolic.ExpressionType) (z3.Value, error) {
-	// TODO: Реализовать (вспомогательный метод)
-	// Безопасно привести interface{} к конкретному Z3 типу
-	panic("не реализовано")
+	switch exprType {
+	case symbolic.IntType:
+		return zt.ctx.IntConst(name)
+	case symbolic.BoolType:
+		return zt.ctx.BoolConst(name)
+	default:
+		panic("Not impl.")
+	}
 }
