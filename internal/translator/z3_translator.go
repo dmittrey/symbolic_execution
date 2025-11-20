@@ -2,13 +2,17 @@
 package translator
 
 import (
-	"github.com/ebukreev/go-z3/z3"
+	"fmt"
+	"strconv"
 	"symbolic-execution-course/internal/symbolic"
+
+	"github.com/ebukreev/go-z3/z3"
 )
 
 // Z3Translator транслирует символьные выражения в Z3 формулы
 type Z3Translator struct {
 	ctx    *z3.Context
+	slv    *z3.Solver
 	config *z3.Config
 	vars   map[string]z3.Value // Кэш переменных
 }
@@ -17,22 +21,88 @@ type Z3Translator struct {
 func NewZ3Translator() *Z3Translator {
 	config := &z3.Config{}
 	ctx := z3.NewContext(config)
+	slv := z3.NewSolver(ctx)
 
 	return &Z3Translator{
 		ctx:    ctx,
+		slv:    slv,
 		config: config,
 		vars:   make(map[string]z3.Value),
+	}
+}
+
+// Reset сбрасывает состояние транслятора
+func (zt *Z3Translator) Reset() {
+	zt.config = &z3.Config{}
+	zt.ctx = z3.NewContext(zt.config)
+	zt.slv = z3.NewSolver(zt.ctx)
+
+	zt.vars = make(map[string]z3.Value)
+}
+
+func (zt *Z3Translator) Assert(expr interface{}) {
+	switch v := expr.(type) {
+	case z3.Bool:
+		zt.slv.Assert(v)
+	case z3.Value:
+		if b, ok := v.(z3.Bool); ok {
+			zt.slv.Assert(b)
+			return
+		}
+		panic(fmt.Sprintf("AssertExpression: non-boolean z3.Value (%T) passed", v))
+	default:
+		panic(fmt.Sprintf("AssertExpression: unsupported type %T", expr))
+	}
+}
+
+func (zt *Z3Translator) AssertExpr(e symbolic.SymbolicExpression) {
+	v, err := zt.TranslateExpression(e)
+	if err != nil {
+		panic("AssertExpr: translate error: " + err.Error())
+	}
+	zt.Assert(v)
+}
+
+func (zt *Z3Translator) IsSatisfiable() (bool, error) {
+	return zt.slv.Check()
+}
+
+func (zt *Z3Translator) Model() *z3.Model {
+	return zt.slv.Model()
+}
+
+// GetIntValue получает значение целочисленной переменной из модели
+func (zt *Z3Translator) GetIntValue(m *z3.Model, variable *symbolic.SymbolicVariable) (int64, error) {
+	val := m.Eval(zt.vars[variable.Name], false)
+	if val == nil {
+		return 0, fmt.Errorf("variable %s not in model", variable.Name)
+	}
+
+	return strconv.ParseInt(val.String(), 10, 64)
+}
+
+// GetBoolValue получает значение булевой переменной из модели
+func (zt *Z3Translator) GetBoolValue(model *z3.Model, variable z3.Bool) (bool, error) {
+	value := model.Eval(variable, false)
+	if value == nil {
+		return false, fmt.Errorf("variable not found in model")
+	}
+
+	// Проверяем строковое представление
+	str := value.String()
+	switch str {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("unexpected boolean value: %s", str)
 	}
 }
 
 // GetContext возвращает Z3 контекст
 func (zt *Z3Translator) GetContext() interface{} {
 	return zt.ctx
-}
-
-// Reset сбрасывает состояние транслятора
-func (zt *Z3Translator) Reset() {
-	zt.vars = make(map[string]z3.Value)
 }
 
 // Close освобождает ресурсы
