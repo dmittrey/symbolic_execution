@@ -1,7 +1,10 @@
 // Package symbolic содержит конкретные реализации символьных выражений
 package symbolic
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // SymbolicExpression - базовый интерфейс для всех символьных выражений
 type SymbolicExpression interface {
@@ -101,28 +104,43 @@ type BinaryOperation struct {
 	Operator BinaryOperator
 }
 
-// TODO: Реализуйте следующие методы в рамках домашнего задания
-
 // NewBinaryOperation создаёт новую бинарную операцию
 func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *BinaryOperation {
-	// TODO: Реализовать
-	// Создать новую бинарную операцию и проверить совместимость типов
-	panic("не реализовано")
+	lt, rt := left.Type(), right.Type()
+
+	switch {
+	case lt == IntType && rt == IntType:
+		return &BinaryOperation{Left: left, Right: right, Operator: op}
+
+	case lt == BoolType && rt == BoolType && (op == EQ || op == NE):
+		return &BinaryOperation{Left: left, Right: right, Operator: op}
+
+	case lt == ArrayType && rt == ArrayType && (op == EQ || op == NE):
+		return &BinaryOperation{Left: left, Right: right, Operator: op}
+
+	default:
+		panic(fmt.Errorf("binary op %v not supported for %v and %v", op, lt, rt))
+	}
 }
 
-// Type возвращает результирующий тип операции
 func (bo *BinaryOperation) Type() ExpressionType {
-	// TODO: Реализовать
-	// Определить результирующий тип на основе операции и типов операндов
-	// Например: int + int = int, int < int = bool
-	panic("не реализовано")
+	switch bo.Operator {
+	case EQ, NE, LT, LE, GT, GE:
+		return BoolType
+	case ADD, SUB, MUL, DIV, MOD:
+		return IntType
+	default:
+		panic("unknown operator")
+	}
 }
 
 // String возвращает строковое представление операции
 func (bo *BinaryOperation) String() string {
-	// TODO: Реализовать
-	// Формат: "(left operator right)"
-	panic("не реализовано")
+	return fmt.Sprintf("(%s %s %s)",
+		bo.Left.String(),
+		bo.Operator.String(),
+		bo.Right.String(),
+	)
 }
 
 // Accept реализует Visitor pattern
@@ -136,13 +154,29 @@ type LogicalOperation struct {
 	Operator LogicalOperator
 }
 
-// TODO: Реализуйте следующие методы в рамках домашнего задания
-
-// NewLogicalOperation создаёт новую логическую операцию
 func NewLogicalOperation(operands []SymbolicExpression, op LogicalOperator) *LogicalOperation {
-	// TODO: Реализовать
-	// Создать логическую операцию и проверить типы операндов
-	panic("не реализовано")
+	for _, o := range operands {
+		if o.Type() != BoolType {
+			panic("logical operation expects bool operands")
+		}
+	}
+	switch op {
+	case NOT:
+		if len(operands) != 1 {
+			panic("NOT expects 1 operand")
+		}
+	case IMPLIES:
+		if len(operands) != 2 {
+			panic("IMPLIES expects 2 operands")
+		}
+	case AND, OR:
+		if len(operands) < 2 {
+			panic("AND/OR expect at least 2 operands")
+		}
+	default:
+		panic("unknown logical operator")
+	}
+	return &LogicalOperation{Operands: operands, Operator: op}
 }
 
 // Type возвращает тип логической операции (всегда bool)
@@ -152,16 +186,177 @@ func (lo *LogicalOperation) Type() ExpressionType {
 
 // String возвращает строковое представление логической операции
 func (lo *LogicalOperation) String() string {
-	// TODO: Реализовать
-	// Для NOT: "!operand"
-	// Для AND/OR: "(operand1 && operand2 && ...)"
-	// Для IMPLIES: "(operand1 => operand2)"
-	panic("не реализовано")
+	switch lo.Operator {
+	case NOT:
+		return fmt.Sprintf("!%s", lo.Operands[0].String())
+	case IMPLIES:
+		return fmt.Sprintf("(%s => %s)", lo.Operands[0].String(), lo.Operands[1].String())
+	default:
+		if len(lo.Operands) < 2 {
+			panic("AND/OR expect at least 2 operand")
+		}
+
+		parts := make([]string, len(lo.Operands))
+		for i, op := range lo.Operands {
+			parts[i] = op.String()
+		}
+		sep := " " + lo.Operator.String() + " " // " && " или " || "
+		return "(" + strings.Join(parts, sep) + ")"
+	}
 }
 
 // Accept реализует Visitor pattern
 func (lo *LogicalOperation) Accept(visitor Visitor) interface{} {
 	return visitor.VisitLogicalOperation(lo)
+}
+
+// - FunctionCall (вызовы функций: f(x, y))
+type FunctionCall struct {
+	Name    string
+	Args    []SymbolicExpression
+	RetType ExpressionType
+}
+
+func NewFunctionCall(name string, args []SymbolicExpression, retType ExpressionType) *FunctionCall {
+	return &FunctionCall{
+		Name:    name,
+		Args:    args,
+		RetType: retType,
+	}
+}
+
+func (fc *FunctionCall) Type() ExpressionType {
+	return fc.RetType
+}
+
+func (fc *FunctionCall) String() string {
+	parts := make([]string, len(fc.Args))
+	for i, a := range fc.Args {
+		parts[i] = a.String()
+	}
+	return "(" + "fn " + fc.Name + ": (" + strings.Join(parts, " -> ") + " -> " + fc.RetType.String() + "))"
+}
+
+func (fc *FunctionCall) Accept(visitor Visitor) interface{} {
+	return visitor.VisitFunctionCall(fc)
+}
+
+// ConditionalExpression (тернарный оператор: condition ? true_expr : false_expr)
+type ConditionalExpression struct {
+	IfOperand   SymbolicExpression
+	ThenOperand SymbolicExpression
+	ElseOperand SymbolicExpression
+}
+
+func NewConditionalExpression(ifOperand SymbolicExpression, thenOperand SymbolicExpression, elseOperand SymbolicExpression) *ConditionalExpression {
+	return &ConditionalExpression{
+		IfOperand:   ifOperand,
+		ThenOperand: thenOperand,
+		ElseOperand: elseOperand,
+	}
+}
+
+func (ce *ConditionalExpression) Type() ExpressionType {
+	if ce.IfOperand.Type() != BoolType {
+		panic("condition of ?: must be bool")
+	}
+	if ce.ThenOperand.Type() != ce.ElseOperand.Type() {
+		panic("then/else types must match")
+	}
+	return ce.ThenOperand.Type()
+}
+
+func (ce *ConditionalExpression) String() string {
+	return fmt.Sprintf("(%s ? %s : %s)",
+		ce.IfOperand.String(), ce.ThenOperand.String(), ce.ElseOperand.String())
+}
+
+func (ce *ConditionalExpression) Accept(visitor Visitor) interface{} {
+	return visitor.VisitConditionalExpression(ce)
+}
+
+type Array struct {
+	Name    string
+	ValType ExpressionType
+}
+
+func NewArray(name string, valType ExpressionType) *Array {
+	if valType != IntType && valType != BoolType {
+		panic(fmt.Sprintf("Unexpected type %s", valType.String()))
+	}
+
+	return &Array{
+		Name:    name,
+		ValType: valType,
+	}
+}
+
+func (expr *Array) Type() ExpressionType {
+	return ArrayType
+}
+
+func (expr *Array) String() string {
+	return expr.Name + "[" + "]"
+}
+
+func (expr *Array) Accept(visitor Visitor) interface{} {
+	return visitor.VisitArray(expr)
+}
+
+// ArrayAccess (доступ к элементам массива: arr[index])
+type ArrayAccess struct {
+	Arr *Array
+	Idx SymbolicExpression
+}
+
+func NewArrayAccess(array *Array, idx SymbolicExpression) *ArrayAccess {
+	if idx.Type() != IntType {
+		panic("Array index must be Int")
+	}
+	return &ArrayAccess{Arr: array, Idx: idx}
+}
+
+func (expr *ArrayAccess) Type() ExpressionType {
+	switch expr.Arr.ValType {
+	case IntType, BoolType:
+		return expr.Arr.ValType
+	default:
+		panic("unsupported array element type")
+	}
+}
+
+func (expr *ArrayAccess) String() string {
+	return expr.Arr.Name + "[" + expr.Idx.String() + "]"
+}
+
+func (expr *ArrayAccess) Accept(visitor Visitor) interface{} {
+	return visitor.VisitArrayAccess(expr)
+}
+
+type ArrayStore struct {
+	Arr *Array
+	Idx SymbolicExpression
+	Val SymbolicExpression
+}
+
+func NewArrayStore(array *Array, idx SymbolicExpression, val SymbolicExpression) *ArrayStore {
+	return &ArrayStore{
+		Arr: array,
+		Idx: idx,
+		Val: val,
+	}
+}
+
+func (expr *ArrayStore) Type() ExpressionType {
+	return ArrayType
+}
+
+func (expr *ArrayStore) String() string {
+	return "store(" + expr.Arr.Name + ", " + expr.Idx.String() + ", " + expr.Val.String() + ")"
+}
+
+func (expr *ArrayStore) Accept(visitor Visitor) interface{} {
+	return visitor.VisitArrayStore(expr)
 }
 
 // Операторы для бинарных выражений
@@ -255,9 +450,3 @@ func (ref *Ref) String() string {
 func (ref *Ref) Accept(visitor Visitor) interface{} {
 	panic("не реализовано")
 }
-
-// TODO: Добавьте дополнительные типы выражений по необходимости:
-// - UnaryOperation (унарные операции: -x, !x)
-// - ArrayAccess (доступ к элементам массива: arr[index])
-// - FunctionCall (вызовы функций: f(x, y))
-// - ConditionalExpression (тернарный оператор: condition ? true_expr : false_expr)
