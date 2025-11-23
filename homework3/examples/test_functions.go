@@ -154,12 +154,63 @@ type Foo struct {
 }
 
 func Aliasing(foo1 *Foo, foo2 *Foo) int {
+	// New variable foo1: IntRef, foo2: IntRef
 	foo2.a = 5
 	foo1.a = 2
 	if foo2.a == 2 {
 		return 4
 	}
 	return 5
+}
+
+func AliasingInt(foo1 *int, foo2 *int) int { // New variable foo1: IntRef, foo2: IntRef
+	*foo2 = 5 // IntSegmentIdx := select(IntRefSegment, foo2.idx)
+	// assert(store(IntSegment, IntSegmentIdx, 2))
+
+	*foo1 = 2 // IntSegmentIdx := select(IntRefSegment, foo1.idx)
+	// assert(store(IntSegment, IntSegmentIdx, 2))
+
+	if *foo2 == 2 { // IntSegmentIdx := select(IntRefSegment, foo2.idx)
+		// assert(select(IntSegment, IntSegmentIdx) == 2)
+		return 4
+	}
+	return 5
+}
+
+func OnStackInt() *int {
+	var foo int
+
+	foo = 5
+
+	return &foo
+}
+
+func OnHeapInt() *int {
+	foo := new(int)
+
+	*foo = 5
+
+	return foo
+}
+
+/*
+func OnStackInt() *int:
+0:                                                                entry P:0 S:0
+        t0 = new int (foo)                                                 *int
+        *t0 = 5:int
+        return t0
+
+func OnHeapInt() *int:
+0:                                                                entry P:0 S:0
+        t0 = new int (new)                                                 *int
+        *t0 = 5:int
+        return t0
+
+*/
+
+func ParamArg(alias1 *int, alias2 *int) *int {
+
+	return alias1
 }
 
 func testPathConstraintMutability(p Person) {
