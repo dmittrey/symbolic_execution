@@ -26,7 +26,8 @@ type SymbolicMemory struct {
 
 	RefSegment *symbolic.Array
 
-	IntSegment *symbolic.Array
+	IntSegment  *symbolic.Array
+	BoolSegment *symbolic.Array
 }
 
 func NewSymbolicMemory() SymbolicMemory {
@@ -36,14 +37,15 @@ func NewSymbolicMemory() SymbolicMemory {
 
 		RefSegment: symbolic.NewArray("RefSegment", symbolic.IntType),
 
-		IntSegment: symbolic.NewArray("IntSegment", symbolic.IntType),
+		IntSegment:  symbolic.NewArray("IntSegment", symbolic.IntType),
+		BoolSegment: symbolic.NewArray("BoolSegment", symbolic.BoolType),
 	}
 }
 
 func (mem *SymbolicMemory) Allocate(tpe symbolic.ExpressionType) *symbolic.Ref {
 	switch tpe {
-	case symbolic.IntType:
-		r := symbolic.NewIntRef(mem.nextId())
+	case symbolic.IntType, symbolic.BoolType:
+		r := symbolic.NewRef(mem.nextId(), tpe)
 
 		// Prevent aliasing for primitives
 		rIdx := mem.getRefIdx(r)
@@ -63,6 +65,10 @@ func (mem *SymbolicMemory) AssignValue(ref *symbolic.Ref, value symbolic.Symboli
 		IntSegmentIdx := symbolic.NewArrayAccess(mem.RefSegment, symbolic.NewIntConstant(ref.Idx))
 
 		mem.IntSegment = symbolic.NewArrayStore(mem.IntSegment, IntSegmentIdx, value)
+	case symbolic.BoolType:
+		BoolSegmentIdx := symbolic.NewArrayAccess(mem.RefSegment, symbolic.NewIntConstant(ref.Idx))
+
+		mem.BoolSegment = symbolic.NewArrayStore(mem.BoolSegment, BoolSegmentIdx, value)
 	default:
 		//TODO implement me
 		panic("implement me")
@@ -70,9 +76,19 @@ func (mem *SymbolicMemory) AssignValue(ref *symbolic.Ref, value symbolic.Symboli
 }
 
 func (mem *SymbolicMemory) GetValue(ref *symbolic.Ref) symbolic.SymbolicExpression {
-	return symbolic.NewArrayAccess(
-		mem.IntSegment,
-		symbolic.NewArrayAccess(mem.RefSegment, symbolic.NewIntConstant(ref.Idx)))
+	switch ref.RefType {
+	case symbolic.IntType:
+		return symbolic.NewArrayAccess(
+			mem.IntSegment,
+			symbolic.NewArrayAccess(mem.RefSegment, symbolic.NewIntConstant(ref.Idx)))
+	case symbolic.BoolType:
+		return symbolic.NewArrayAccess(
+			mem.BoolSegment,
+			symbolic.NewArrayAccess(mem.RefSegment, symbolic.NewIntConstant(ref.Idx)))
+	default:
+		//TODO implement me
+		panic("implement me")
+	}
 }
 
 func (mem *SymbolicMemory) AssignField(ref *symbolic.Ref, fieldIdx int, value symbolic.SymbolicExpression) {
