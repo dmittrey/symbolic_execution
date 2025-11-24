@@ -50,25 +50,18 @@ func main() {
 	source := `
 package main
 
-func OnStackInt() *int {
-	var foo int
-
-	foo = 5
-
-	return &foo
+type Person struct {
+	Name string
+	Age  int
+	ID   int
 }
 
-func OnHeapInt() *int {
-	foo := new(int)
-
-	*foo = 5 
-
-	return foo
-}
-
-func ParamArg(alias1 *int, alias2 *int) *int {
-
-	return alias1
+func testStructBasic() Person {
+	var p Person
+	p.Name = "Alice"
+	p.Age = 25
+	p.ID = 1001
+	return p
 }
 `
 
@@ -76,7 +69,7 @@ func ParamArg(alias1 *int, alias2 *int) *int {
 	builder := ssa.NewBuilder()
 
 	// Строим SSA из исходного кода
-	fn, err := builder.ParseAndBuildSSA(source, "ParamArg")
+	fn, err := builder.ParseAndBuildSSA(source, "testStructBasic")
 	if err != nil {
 		log.Fatalf("Ошибка построения SSA: %v", err)
 	}
