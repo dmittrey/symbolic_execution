@@ -434,10 +434,10 @@ type Ref struct {
 	RefType ExpressionType
 }
 
-func NewIntRef(idx int64) *Ref {
+func NewRef(idx int64, refType ExpressionType) *Ref {
 	return &Ref{
 		Idx:     idx,
-		RefType: IntType,
+		RefType: refType,
 	}
 }
 
