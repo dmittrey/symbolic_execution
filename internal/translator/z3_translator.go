@@ -355,23 +355,50 @@ func (zt *Z3Translator) VisitConditionalExpression(expr *symbolic.ConditionalExp
 }
 
 func (zt *Z3Translator) VisitArray(expr *symbolic.Array) interface{} {
-	// Индексный сорт — Int (если так задумано)
-	idx := zt.ctx.IntSort()
+	// Индексный сорт — Int
+	idxSort := zt.ctx.IntSort()
 
 	// Сорт элементов
-	var elem z3.Sort
+	var elemSort z3.Sort
 	switch expr.ValType {
 	case symbolic.IntType:
-		elem = zt.ctx.IntSort()
+		elemSort = zt.ctx.IntSort()
 	case symbolic.BoolType:
-		elem = zt.ctx.BoolSort()
+		elemSort = zt.ctx.BoolSort()
 	default:
 		panic("VisitArray: unsupported element type")
 	}
 
-	// Сорт массива и символьная константа этого сорта
-	arrSort := zt.ctx.ArraySort(idx, elem)
-	return zt.ctx.Const(expr.Name, arrSort) // <- символьный массив, НЕ ConstArray
+	arrSort := zt.ctx.ArraySort(idxSort, elemSort)
+
+	// Базовый массив: константа Z3 (Array Int elemSort)
+	z3Arr := zt.ctx.Const(expr.Name, arrSort).(z3.Array)
+
+	// Накатываем все store'ы поверх базового массива
+	for i, st := range expr.Stores {
+		idxV, err := zt.TranslateExpression(st.Idx)
+		if err != nil {
+			panic(fmt.Sprintf("VisitArray: translate store #%d index: %v", i, err))
+		}
+		valV, err := zt.TranslateExpression(st.Val)
+		if err != nil {
+			panic(fmt.Sprintf("VisitArray: translate store #%d value: %v", i, err))
+		}
+
+		idx, ok := idxV.(z3.Value)
+		if !ok {
+			panic("VisitArray: store index is not z3.Value")
+		}
+		val, ok := valV.(z3.Value)
+		if !ok {
+			panic("VisitArray: store value is not z3.Value")
+		}
+
+		// Store возвращает НОВЫЙ массив, поэтому переприсваиваем
+		z3Arr = z3Arr.Store(idx, val)
+	}
+
+	return z3Arr
 }
 
 func (zt *Z3Translator) VisitArrayAccess(expr *symbolic.ArrayAccess) interface{} {
@@ -394,36 +421,6 @@ func (zt *Z3Translator) VisitArrayAccess(expr *symbolic.ArrayAccess) interface{}
 	}
 
 	return arr.Select(idx)
-}
-
-func (zt *Z3Translator) VisitArrayStore(expr *symbolic.ArrayStore) interface{} {
-	arrV, err := zt.TranslateExpression(expr.Arr)
-	if err != nil {
-		panic("VisitArrayStore: translate Arr: " + err.Error())
-	}
-	idxV, err := zt.TranslateExpression(expr.Idx)
-	if err != nil {
-		panic("VisitArrayStore: translate Idx: " + err.Error())
-	}
-	valV, err := zt.TranslateExpression(expr.Val)
-	if err != nil {
-		panic("VisitArrayStore: translate Val: " + err.Error())
-	}
-
-	arr, ok := arrV.(z3.Array)
-	if !ok {
-		panic("VisitArrayStore: Arr is not z3.Array")
-	}
-	idx, ok := idxV.(z3.Value)
-	if !ok {
-		panic("VisitArrayStore: Idx is not z3.Value")
-	}
-	val, ok := valV.(z3.Value)
-	if !ok {
-		panic("VisitArrayStore: Val is not z3.Value")
-	}
-
-	return arr.Store(idx, val)
 }
 
 // Вспомогательные методы

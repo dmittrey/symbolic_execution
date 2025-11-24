@@ -29,7 +29,6 @@ type ExpressionTranslator interface {
 	VisitConditionalExpression(expr *symbolic.ConditionalExpression) (interface{}, error)
 	VisitArray(expr *symbolic.Array) (interface{}, error)
 	VisitArrayAccess(expr *symbolic.ArrayAccess) (interface{}, error)
-	VisitArrayStore(expr *symbolic.ArrayStore) (interface{}, error)
 }
 
 // TranslationError представляет ошибку трансляции

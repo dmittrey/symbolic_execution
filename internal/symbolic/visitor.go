@@ -11,5 +11,4 @@ type Visitor interface {
 	VisitConditionalExpression(expr *ConditionalExpression) interface{}
 	VisitArray(expr *Array) interface{}
 	VisitArrayAccess(expr *ArrayAccess) interface{}
-	VisitArrayStore(expr *ArrayStore) interface{}
 }

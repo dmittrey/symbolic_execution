@@ -278,6 +278,10 @@ func (ce *ConditionalExpression) Accept(visitor Visitor) interface{} {
 type Array struct {
 	Name    string
 	ValType ExpressionType
+	Stores  []struct {
+		Idx SymbolicExpression
+		Val SymbolicExpression
+	}
 }
 
 func NewArray(name string, valType ExpressionType) *Array {
@@ -289,6 +293,22 @@ func NewArray(name string, valType ExpressionType) *Array {
 		Name:    name,
 		ValType: valType,
 	}
+}
+
+func NewArrayStore(array *Array, idx SymbolicExpression, val SymbolicExpression) *Array {
+	if val.Type() != array.ValType {
+		panic(fmt.Sprintf("Array value must be %s", array.ValType.String()))
+	}
+
+	array.Stores = append(array.Stores, struct {
+		Idx SymbolicExpression
+		Val SymbolicExpression
+	}{
+		Idx: idx,
+		Val: val,
+	})
+
+	return array
 }
 
 func (expr *Array) Type() ExpressionType {
@@ -331,32 +351,6 @@ func (expr *ArrayAccess) String() string {
 
 func (expr *ArrayAccess) Accept(visitor Visitor) interface{} {
 	return visitor.VisitArrayAccess(expr)
-}
-
-type ArrayStore struct {
-	Arr *Array
-	Idx SymbolicExpression
-	Val SymbolicExpression
-}
-
-func NewArrayStore(array *Array, idx SymbolicExpression, val SymbolicExpression) *ArrayStore {
-	return &ArrayStore{
-		Arr: array,
-		Idx: idx,
-		Val: val,
-	}
-}
-
-func (expr *ArrayStore) Type() ExpressionType {
-	return ArrayType
-}
-
-func (expr *ArrayStore) String() string {
-	return "store(" + expr.Arr.Name + ", " + expr.Idx.String() + ", " + expr.Val.String() + ")"
-}
-
-func (expr *ArrayStore) Accept(visitor Visitor) interface{} {
-	return visitor.VisitArrayStore(expr)
 }
 
 // Операторы для бинарных выражений
