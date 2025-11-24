@@ -64,6 +64,10 @@ func (zt *Z3Translator) AssertExpr(e symbolic.SymbolicExpression) {
 	zt.Assert(v)
 }
 
+func (zt *Z3Translator) SolverToString() string {
+	return zt.slv.String()
+}
+
 func (zt *Z3Translator) IsSatisfiable() (bool, error) {
 	return zt.slv.Check()
 }
