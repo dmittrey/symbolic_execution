@@ -45,8 +45,9 @@ func (mem *SymbolicMemory) Allocate(tpe symbolic.ExpressionType) *symbolic.Ref {
 	case symbolic.IntType:
 		r := symbolic.NewIntRef(mem.nextId())
 
-		// TODO Ignore now
-		// mem.NotAliasingRefs = append(mem.NotAliasingRefs, r)
+		// Prevent aliasing for primitives
+		rIdx := mem.getRefIdx(r)
+		mem.RefSegment = symbolic.NewArrayStore(mem.RefSegment, rIdx, rIdx)
 
 		return r
 	default:
@@ -92,6 +93,10 @@ func (mem *SymbolicMemory) AssignToArray(ref *symbolic.Ref, index int, value sym
 func (mem *SymbolicMemory) GetFromArray(ref *symbolic.Ref, index int) symbolic.SymbolicExpression {
 	//TODO implement me
 	panic("implement me")
+}
+
+func (mem *SymbolicMemory) getRefIdx(ref *symbolic.Ref) *symbolic.IntConstant {
+	return symbolic.NewIntConstant(ref.Idx)
 }
 
 func (mem *SymbolicMemory) nextId() int64 {
