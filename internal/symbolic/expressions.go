@@ -430,17 +430,25 @@ func (op LogicalOperator) String() string {
 }
 
 type Ref struct {
-	// TODO: Выбрать и написать внутреннее представление символьной ссылки
+	Idx     int64
+	RefType ExpressionType
 }
 
-func (ref *Ref) Type() ExpressionType {
-	panic("не реализовано")
+func NewIntRef(idx int64) *Ref {
+	return &Ref{
+		Idx:     idx,
+		RefType: IntType,
+	}
 }
 
-func (ref *Ref) String() string {
-	panic("не реализовано")
+func (r *Ref) Type() ExpressionType {
+	return r.RefType
 }
 
-func (ref *Ref) Accept(visitor Visitor) interface{} {
-	panic("не реализовано")
+func (r *Ref) String() string {
+	return fmt.Sprintf("&%d", r.Idx)
+}
+
+func (r *Ref) Accept(visitor Visitor) interface{} {
+	panic("implement me")
 }
