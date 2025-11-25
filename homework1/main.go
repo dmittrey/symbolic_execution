@@ -56,12 +56,81 @@ type Person struct {
 	ID   int
 }
 
-func testStructBasic() Person {
-	var p Person
-	p.Name = "Alice"
-	p.Age = 25
-	p.ID = 1001
+func testStructPointer() *Person {
+	p := &Person{Name: "Bob", Age: 30, ID: 2002}
+	p.Age = p.Age + 5
 	return p
+}
+
+func testStructPointerModification(p *Person) {
+	if p != nil {
+		p.Age = p.Age + 10
+		p.ID = p.ID + 1000
+	}
+}
+
+func testNestedStructPointer() {
+	p := testStructPointer()
+	testStructPointerModification(p)
+}
+
+func testArrayFixed() [5]int {
+	var arr [5]int
+	for i := 0; i < 5; i++ {
+		arr[i] = i * i
+	}
+	return arr
+}
+
+func testArrayModification(arr [5]int) [5]int {
+	for i := range arr {
+		arr[i] = arr[i] + 1
+	}
+	return arr
+}
+
+func testSliceCreation() []int {
+	slice := make([]int, 5)
+	for i := range slice {
+		slice[i] = i * 2
+	}
+	return slice
+}
+
+func testSliceAppend() []int {
+	var slice []int
+	for i := 0; i < 3; i++ {
+		slice = append(slice, i*10)
+	}
+	return slice
+}
+
+func testSliceModification(slice []int) []int {
+	for i := range slice {
+		slice[i] = slice[i] * 2
+	}
+	slice = append(slice, 999)
+	return slice
+}
+
+type Student struct {
+	Name    string
+	Grades  [5]int
+	Average float64
+}
+
+func testStructWithArray() Student {
+	var s Student
+	s.Name = "Charlie"
+	s.Grades = [5]int{85, 90, 78, 92, 88}
+
+	sum := 0
+	for _, grade := range s.Grades {
+		sum += grade
+	}
+	s.Average = float64(sum) / float64(len(s.Grades))
+
+	return s
 }
 `
 
@@ -69,31 +138,16 @@ func testStructBasic() Person {
 	builder := ssa.NewBuilder()
 
 	// Строим SSA из исходного кода
-	fn, err := builder.ParseAndBuildSSA(source, "testStructBasic")
+	fn, err := builder.ParseAndBuildSSA(source, "testArrayModification")
 	if err != nil {
 		log.Fatalf("Ошибка построения SSA: %v", err)
 	}
 	fmt.Printf("CFG построен для функции с %d блоками\n", len(fn.Blocks))
 
-	fmt.Println("\n=== SSA dump функции testStructBasic ===")
+	fmt.Println("\n=== SSA dump функции testArrayModification ===")
 	var buf bytes.Buffer
 	gosssa.WriteFunction(&buf, fn) // WriteFunction ждёт *bytes.Buffer
 	buf.WriteTo(os.Stdout)         // выводим на stdout
 
 	dumpStructTypes(fn)
 }
-
-/*
-func OnStackInt() *int:
-0:                                                                entry P:0 S:0
-        t0 = new int (foo)                                                 *int
-        *t0 = 5:int
-        return t0
-
-func OnHeapInt() *int:
-0:                                                                entry P:0 S:0
-        t0 = new int (new)                                                 *int
-        *t0 = 5:int
-        return t0
-
-*/
