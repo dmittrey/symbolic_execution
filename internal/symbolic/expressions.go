@@ -115,6 +115,9 @@ func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *Bina
 	case lt == BoolType && rt == BoolType && (op == EQ || op == NE):
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 
+	case lt == StringType && rt == StringType && (op == EQ || op == NE):
+		return &BinaryOperation{Left: left, Right: right, Operator: op}
+
 	case lt == ArrayType && rt == ArrayType && (op == EQ || op == NE):
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 
@@ -285,7 +288,7 @@ type Array struct {
 }
 
 func NewArray(name string, valType ExpressionType) *Array {
-	if valType != IntType && valType != BoolType {
+	if valType != IntType && valType != BoolType && valType != StringType {
 		panic(fmt.Sprintf("Unexpected type %s", valType.String()))
 	}
 
@@ -300,15 +303,27 @@ func NewArrayStore(array *Array, idx SymbolicExpression, val SymbolicExpression)
 		panic(fmt.Sprintf("Array value must be %s", array.ValType.String()))
 	}
 
-	array.Stores = append(array.Stores, struct {
+	// Делаем ПЕРСИСТЕНТНУЮ версию: новый Array с копией старых stores + новый store
+	newStores := make([]struct {
+		Idx SymbolicExpression
+		Val SymbolicExpression
+	}, len(array.Stores)+1)
+
+	copy(newStores, array.Stores)
+
+	newStores[len(array.Stores)] = struct {
 		Idx SymbolicExpression
 		Val SymbolicExpression
 	}{
 		Idx: idx,
 		Val: val,
-	})
+	}
 
-	return array
+	return &Array{
+		Name:    array.Name,
+		ValType: array.ValType,
+		Stores:  newStores,
+	}
 }
 
 func (expr *Array) Type() ExpressionType {
@@ -338,7 +353,7 @@ func NewArrayAccess(array *Array, idx SymbolicExpression) *ArrayAccess {
 
 func (expr *ArrayAccess) Type() ExpressionType {
 	switch expr.Arr.ValType {
-	case IntType, BoolType:
+	case IntType, BoolType, StringType:
 		return expr.Arr.ValType
 	default:
 		panic("unsupported array element type")
@@ -451,4 +466,30 @@ func (r *Ref) String() string {
 
 func (r *Ref) Accept(visitor Visitor) interface{} {
 	panic("implement me")
+}
+
+// StringConstant представляет строковую константу
+type StringConstant struct {
+	Value string
+}
+
+// NewStringConstant создаёт новую строковую константу
+func NewStringConstant(value string) *StringConstant {
+	return &StringConstant{Value: value}
+}
+
+// Type возвращает тип константы
+func (sc *StringConstant) Type() ExpressionType {
+	return StringType
+}
+
+// String возвращает строковое представление константы
+func (sc *StringConstant) String() string {
+	// с кавычками, чтобы в дампах было видно, что это строка
+	return fmt.Sprintf("%q", sc.Value)
+}
+
+// Accept реализует Visitor pattern
+func (sc *StringConstant) Accept(visitor Visitor) interface{} {
+	return visitor.VisitStringConstant(sc)
 }

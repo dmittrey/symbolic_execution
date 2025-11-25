@@ -11,4 +11,5 @@ type Visitor interface {
 	VisitConditionalExpression(expr *ConditionalExpression) interface{}
 	VisitArray(expr *Array) interface{}
 	VisitArrayAccess(expr *ArrayAccess) interface{}
+	VisitStringConstant(*StringConstant) interface{}
 }

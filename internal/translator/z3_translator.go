@@ -12,10 +12,11 @@ import (
 
 // Z3Translator транслирует символьные выражения в Z3 формулы
 type Z3Translator struct {
-	ctx    *z3.Context
-	slv    *z3.Solver
-	config *z3.Config
-	vars   map[string]z3.Value // Кэш переменных
+	ctx        *z3.Context
+	slv        *z3.Solver
+	config     *z3.Config
+	vars       map[string]z3.Value // Кэш переменных
+	stringSort z3.Sort
 }
 
 // NewZ3Translator создаёт новый экземпляр Z3 транслятора
@@ -25,20 +26,21 @@ func NewZ3Translator() *Z3Translator {
 	slv := z3.NewSolver(ctx)
 
 	return &Z3Translator{
-		ctx:    ctx,
-		slv:    slv,
-		config: config,
-		vars:   make(map[string]z3.Value),
+		ctx:        ctx,
+		slv:        slv,
+		config:     config,
+		vars:       make(map[string]z3.Value),
+		stringSort: ctx.UninterpretedSort("String"),
 	}
 }
 
-// Reset сбрасывает состояние транслятора
 func (zt *Z3Translator) Reset() {
 	zt.config = &z3.Config{}
 	zt.ctx = z3.NewContext(zt.config)
 	zt.slv = z3.NewSolver(zt.ctx)
 
 	zt.vars = make(map[string]z3.Value)
+	zt.stringSort = zt.ctx.UninterpretedSort("String")
 }
 
 func (zt *Z3Translator) Assert(expr interface{}) {
@@ -228,6 +230,27 @@ func (zt *Z3Translator) VisitBinaryOperation(expr *symbolic.BinaryOperation) int
 		}
 	}
 
+	// --- строки: Uninterpreted ---
+	if expr.Left.Type() == symbolic.StringType && expr.Right.Type() == symbolic.StringType {
+		lu, ok := leftZ3.(z3.Uninterpreted)
+		if !ok {
+			panic("VisitBinaryOperation: left string is not z3.Uninterpreted")
+		}
+		ru, ok := rightZ3.(z3.Uninterpreted)
+		if !ok {
+			panic("VisitBinaryOperation: right string is not z3.Uninterpreted")
+		}
+
+		switch expr.Operator {
+		case symbolic.EQ:
+			return lu.Eq(ru)
+		case symbolic.NE:
+			return lu.NE(ru)
+		default:
+			panic("VisitBinaryOperation: unsupported operator for string")
+		}
+	}
+
 	panic("Not impl type.")
 }
 
@@ -365,6 +388,8 @@ func (zt *Z3Translator) VisitArray(expr *symbolic.Array) interface{} {
 		elemSort = zt.ctx.IntSort()
 	case symbolic.BoolType:
 		elemSort = zt.ctx.BoolSort()
+	case symbolic.StringType:
+		elemSort = zt.stringSort
 	default:
 		panic("VisitArray: unsupported element type")
 	}
@@ -423,6 +448,10 @@ func (zt *Z3Translator) VisitArrayAccess(expr *symbolic.ArrayAccess) interface{}
 	return arr.Select(idx)
 }
 
+func (zt *Z3Translator) VisitStringConstant(c *symbolic.StringConstant) interface{} {
+	return zt.ctx.Const("str_"+c.Value, zt.stringSort)
+}
+
 // Вспомогательные методы
 
 // createZ3Variable создаёт Z3 переменную соответствующего типа
@@ -432,6 +461,8 @@ func (zt *Z3Translator) createZ3Variable(name string, exprType symbolic.Expressi
 		return zt.ctx.IntConst(name)
 	case symbolic.BoolType:
 		return zt.ctx.BoolConst(name)
+	case symbolic.StringType:
+		return zt.ctx.Const(name, zt.stringSort)
 	default:
 		panic("Not impl.")
 	}

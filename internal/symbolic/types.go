@@ -7,6 +7,7 @@ type ExpressionType int
 const (
 	IntType ExpressionType = iota
 	BoolType
+	StringType
 	ArrayType
 	StructType
 )
@@ -18,8 +19,12 @@ func (et ExpressionType) String() string {
 		return "int"
 	case BoolType:
 		return "bool"
+	case StringType:
+		return "string"
 	case ArrayType:
 		return "array"
+	case StructType:
+		return "struct"
 	default:
 		return "unknown"
 	}
