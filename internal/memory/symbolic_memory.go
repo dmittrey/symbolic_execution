@@ -37,6 +37,8 @@ type SymbolicMemory struct {
 	TypeToInt    map[string]int
 
 	FieldsSegment map[int]map[int]*symbolic.Array
+
+	ArraysSegment map[int]*symbolic.Array
 }
 
 func NewSymbolicMemory() SymbolicMemory {
@@ -52,6 +54,8 @@ func NewSymbolicMemory() SymbolicMemory {
 		RefToTypeIdx:  make(map[int]int),
 		TypeToInt:     make(map[string]int),
 		FieldsSegment: make(map[int]map[int]*symbolic.Array),
+
+		ArraysSegment: make(map[int]*symbolic.Array),
 	}
 }
 
@@ -64,6 +68,12 @@ func (mem *SymbolicMemory) Allocate(tpe symbolic.ExpressionType) *symbolic.Ref {
 		rIdx := mem.getRefIdx(r)
 		mem.RefSegment = symbolic.NewArrayStore(mem.RefSegment, rIdx, rIdx)
 
+		return r
+	case symbolic.ArrayType:
+		// Массив считаем "array of int" (под твой [5]int/[]int)
+		r := symbolic.NewRef(mem.nextId(), symbolic.ArrayType)
+		mem.ArraysSegment[int(r.Idx)] =
+			symbolic.NewArray(fmt.Sprintf("Array_%d", r.Idx), symbolic.IntType)
 		return r
 	default:
 		//TODO implement me
@@ -142,13 +152,39 @@ func (mem *SymbolicMemory) GetFieldValue(ref *symbolic.Ref, fieldIdx int) symbol
 }
 
 func (mem *SymbolicMemory) AssignToArray(ref *symbolic.Ref, index int, value symbolic.SymbolicExpression) {
-	//TODO implement me
-	panic("implement me")
+	if ref.RefType != symbolic.ArrayType {
+		panic("AssignToArray: ref is not array")
+	}
+
+	arr := mem.ArraysSegment[int(ref.Idx)]
+	if arr == nil {
+		// если вдруг не инициализирован – создаём, тип берём из value
+		arr = symbolic.NewArray(fmt.Sprintf("Array_%d", ref.Idx), value.Type())
+	}
+
+	if arr.ValType != value.Type() {
+		panic(fmt.Sprintf("AssignToArray: value type %s != array elem type %s",
+			value.Type().String(), arr.ValType.String()))
+	}
+
+	idxExpr := symbolic.NewIntConstant(int64(index))
+	mem.ArraysSegment[int(ref.Idx)] = symbolic.NewArrayStore(arr, idxExpr, value)
 }
 
 func (mem *SymbolicMemory) GetFromArray(ref *symbolic.Ref, index int) symbolic.SymbolicExpression {
-	//TODO implement me
-	panic("implement me")
+	if ref.RefType != symbolic.ArrayType {
+		panic("GetFromArray: ref is not array")
+	}
+
+	arr := mem.ArraysSegment[int(ref.Idx)]
+	if arr == nil {
+		// Лениво инициализируем массив int'ов
+		arr = symbolic.NewArray(fmt.Sprintf("Array_%d", ref.Idx), symbolic.IntType)
+		mem.ArraysSegment[int(ref.Idx)] = arr
+	}
+
+	idxExpr := symbolic.NewIntConstant(int64(index))
+	return symbolic.NewArrayAccess(arr, idxExpr)
 }
 
 func (mem *SymbolicMemory) getRefIdx(ref *symbolic.Ref) *symbolic.IntConstant {

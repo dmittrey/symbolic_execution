@@ -17,6 +17,8 @@ type Z3Translator struct {
 	config     *z3.Config
 	vars       map[string]z3.Value // Кэш переменных
 	stringSort z3.Sort
+
+	arraysInProgress map[*symbolic.Array]bool
 }
 
 // NewZ3Translator создаёт новый экземпляр Z3 транслятора
@@ -26,11 +28,12 @@ func NewZ3Translator() *Z3Translator {
 	slv := z3.NewSolver(ctx)
 
 	return &Z3Translator{
-		ctx:        ctx,
-		slv:        slv,
-		config:     config,
-		vars:       make(map[string]z3.Value),
-		stringSort: ctx.UninterpretedSort("String"),
+		ctx:              ctx,
+		slv:              slv,
+		config:           config,
+		vars:             make(map[string]z3.Value),
+		stringSort:       ctx.UninterpretedSort("String"),
+		arraysInProgress: make(map[*symbolic.Array]bool),
 	}
 }
 
@@ -41,6 +44,7 @@ func (zt *Z3Translator) Reset() {
 
 	zt.vars = make(map[string]z3.Value)
 	zt.stringSort = zt.ctx.UninterpretedSort("String")
+	zt.arraysInProgress = make(map[*symbolic.Array]bool)
 }
 
 func (zt *Z3Translator) Assert(expr interface{}) {
@@ -395,6 +399,15 @@ func (zt *Z3Translator) VisitArray(expr *symbolic.Array) interface{} {
 	}
 
 	arrSort := zt.ctx.ArraySort(idxSort, elemSort)
+
+	// Если уже строим этот же массив — возвращаем "базовый" константный массив,
+	// чтобы не уйти в бесконечную рекурсию при select(store(arr,...),...)
+	if zt.arraysInProgress[expr] {
+		return zt.ctx.Const(expr.Name, arrSort).(z3.Array)
+	}
+
+	zt.arraysInProgress[expr] = true
+	defer delete(zt.arraysInProgress, expr)
 
 	// Базовый массив: константа Z3 (Array Int elemSort)
 	z3Arr := zt.ctx.Const(expr.Name, arrSort).(z3.Array)
