@@ -30,21 +30,6 @@ func mustSat(tr *translator.Z3Translator) *z3.Model {
 	return tr.Model()
 }
 
-/*
-func OnStackInt() *int:
-0:                                                                entry P:0 S:0
-        t0 = new int (foo)                                                 *int
-        *t0 = 5:int
-        return t0
-
-func OnHeapInt() *int:
-0:                                                                entry P:0 S:0
-        t0 = new int (new)                                                 *int
-        *t0 = 5:int
-        return t0
-
-*/
-
 func main() {
 	// 1) UNSAT: int prevent aliasing
 	runTest("1) UNSAT: int prevent aliasing", func(tr *translator.Z3Translator) {
@@ -169,4 +154,57 @@ func main() {
 			fmt.Printf("Model:\n%s\n", m.String())
 		}
 	})
+
+	// 5) SAT: struct Person basic fields
+	runTest("5) SAT: struct Person basic fields", func(tr *translator.Z3Translator) {
+		mem := memory.NewSymbolicMemory()
+
+		// t0 = local Person (p) *Person
+		person := mem.AllocateStruct("Person", []symbolic.ExpressionType{
+			symbolic.StringType, // Name
+			symbolic.IntType,    // Age
+			symbolic.IntType,    // ID
+		})
+
+		// t1 = &t0.Name [#0]; *t1 = "Alice"
+		mem.AssignField(person, 0, symbolic.NewStringConstant("Alice"))
+
+		// t2 = &t0.Age [#1]; *t2 = 25
+		mem.AssignField(person, 1, symbolic.NewIntConstant(25))
+
+		// t3 = &t0.ID [#2]; *t3 = 1001
+		mem.AssignField(person, 2, symbolic.NewIntConstant(1001))
+
+		// t4 = *t0  (по сути мы просто читаем поля у person)
+		nameVal := mem.GetFieldValue(person, 0)
+		ageVal := mem.GetFieldValue(person, 1)
+		idVal := mem.GetFieldValue(person, 2)
+
+		// Проверяем:
+		// Name == "Alice"
+		tr.AssertExpr(symbolic.NewBinaryOperation(
+			nameVal,
+			symbolic.NewStringConstant("Alice"),
+			symbolic.EQ,
+		))
+
+		// Age == 25
+		tr.AssertExpr(symbolic.NewBinaryOperation(
+			ageVal,
+			symbolic.NewIntConstant(25),
+			symbolic.EQ,
+		))
+
+		// ID == 1001
+		tr.AssertExpr(symbolic.NewBinaryOperation(
+			idVal,
+			symbolic.NewIntConstant(1001),
+			symbolic.EQ,
+		))
+
+		if m := mustSat(tr); m != nil {
+			fmt.Printf("Model:\n%s\n", m.String())
+		}
+	})
+
 }
