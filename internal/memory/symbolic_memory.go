@@ -11,6 +11,35 @@ type Memory interface {
 
 	GetValue(ref *symbolic.Ref) symbolic.SymbolicExpression
 
+	/*
+			=== SSA dump функции testStructBasic ===
+		# Name: main.testStructBasic
+		# Package: main
+		# Location: 10:6
+		# Locals:
+		#   0:  t0 Person
+		func testStructBasic() Person:
+		0:                                                                entry P:0 S:0
+		        t0 = local Person (p)                                           *Person
+		        t1 = &t0.Name [#0]                                                 *int
+		        *t1 = 5:int
+		        t2 = &t0.Age [#1]                                                  *int
+		        *t2 = 25:int
+		        t3 = &t0.ID [#2]                                                   *int
+		        *t3 = 1001:int
+		        t4 = *t0                                                         Person
+		        return t4
+
+
+		=== Типы-структуры в пакете ===
+		type Person struct {
+		    Name int
+		    Age int
+		    ID int
+		}
+	*/
+	AllocateStruct(name string, fields []symbolic.ExpressionType)
+
 	AssignField(ref *symbolic.Ref, fieldIdx int, value symbolic.SymbolicExpression)
 
 	GetFieldValue(ref *symbolic.Ref, fieldIdx int) symbolic.SymbolicExpression
@@ -70,8 +99,7 @@ func (mem *SymbolicMemory) AssignValue(ref *symbolic.Ref, value symbolic.Symboli
 
 		mem.BoolSegment = symbolic.NewArrayStore(mem.BoolSegment, BoolSegmentIdx, value)
 	default:
-		//TODO implement me
-		panic("implement me")
+		panic("AssignValue: Unsupported operation for type")
 	}
 }
 
@@ -86,9 +114,9 @@ func (mem *SymbolicMemory) GetValue(ref *symbolic.Ref) symbolic.SymbolicExpressi
 			mem.BoolSegment,
 			symbolic.NewArrayAccess(mem.RefSegment, symbolic.NewIntConstant(ref.Idx)))
 	default:
-		//TODO implement me
-		panic("implement me")
+		panic("AssignValue: Unsupported operation for type")
 	}
+}
 }
 
 func (mem *SymbolicMemory) AssignField(ref *symbolic.Ref, fieldIdx int, value symbolic.SymbolicExpression) {
