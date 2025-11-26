@@ -6,19 +6,21 @@ import (
 )
 
 type Memory interface {
+	Param(tpe symbolic.ExpressionType) *symbolic.Ref
+
 	Allocate(tpe symbolic.ExpressionType) *symbolic.Ref
+
+	AllocateStruct(name string, fields []symbolic.ExpressionType) *symbolic.Ref
+
+	AllocateArray(tp symbolic.ExpressionType) *symbolic.Ref
 
 	AssignValue(ref *symbolic.Ref, value symbolic.SymbolicExpression)
 
 	GetValue(ref *symbolic.Ref) symbolic.SymbolicExpression
 
-	AllocateStruct(name string, fields []symbolic.ExpressionType) *symbolic.Ref
-
 	AssignField(ref *symbolic.Ref, fieldIdx int, value symbolic.SymbolicExpression)
 
 	GetFieldValue(ref *symbolic.Ref, fieldIdx int) symbolic.SymbolicExpression
-
-	AllocateArray(tp symbolic.ExpressionType) *symbolic.Ref
 
 	AssignToArray(ref *symbolic.Ref, index int, value symbolic.SymbolicExpression)
 
@@ -75,6 +77,10 @@ func (mem *SymbolicMemory) Allocate(tpe symbolic.ExpressionType) *symbolic.Ref {
 		//TODO implement me
 		panic("implement me")
 	}
+}
+
+func (mem *SymbolicMemory) Param(tpe symbolic.ExpressionType) *symbolic.Ref {
+	return symbolic.NewRef(mem.nextId(), tpe)
 }
 
 // Ref lvalue -> SymExpr (primitive variant)
