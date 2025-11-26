@@ -476,6 +476,9 @@ func (zt *Z3Translator) createZ3Variable(name string, exprType symbolic.Expressi
 		return zt.ctx.BoolConst(name)
 	case symbolic.StringType:
 		return zt.ctx.Const(name, zt.stringSort)
+	case symbolic.ArrayType:
+		arrSort := zt.ctx.ArraySort(zt.ctx.IntSort(), zt.ctx.IntSort())
+		return zt.ctx.Const(name, arrSort)
 	default:
 		panic("Not impl.")
 	}
