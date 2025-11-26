@@ -79,7 +79,7 @@ func (mem *SymbolicMemory) Allocate(tpe symbolic.ExpressionType) *symbolic.Ref {
 	}
 }
 
-func (mem *SymbolicMemory) Param(tpe symbolic.ExpressionType) *symbolic.Ref {
+func (mem *SymbolicMemory) ParamRef(tpe symbolic.ExpressionType) *symbolic.Ref {
 	return symbolic.NewRef(mem.nextId(), tpe)
 }
 
