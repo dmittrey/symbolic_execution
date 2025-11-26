@@ -74,8 +74,7 @@ func (mem *SymbolicMemory) Allocate(tpe symbolic.ExpressionType) *symbolic.Ref {
 
 		return r
 	default:
-		//TODO implement me
-		panic("implement me")
+		panic(fmt.Sprintf("Allocate: Use another allocation method for %s", tpe.String()))
 	}
 }
 
