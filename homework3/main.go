@@ -468,7 +468,7 @@ func main() {
 	runTest("10) SAT: testArrayFixed", func(tr *translator.Z3Translator) {
 		mem := memory.NewSymbolicMemory()
 
-		arr := mem.Allocate(symbolic.ArrayType)
+		arr := mem.AllocateArray(symbolic.IntType)
 
 		for i := 0; i < 5; i++ {
 			mem.AssignToArray(arr, i, symbolic.NewIntConstant(int64(i*i)))
@@ -497,7 +497,7 @@ func main() {
 		mem := memory.NewSymbolicMemory()
 
 		// параметр arr [5]int: задаём 5 символьных значений
-		arr := mem.Allocate(symbolic.ArrayType)
+		arr := mem.AllocateArray(symbolic.IntType)
 
 		for i := 0; i < 5; i++ {
 			v := symbolic.NewSymbolicVariable(fmt.Sprintf("arr_%d", i), symbolic.IntType)

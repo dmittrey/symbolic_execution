@@ -18,6 +18,8 @@ type Memory interface {
 
 	GetFieldValue(ref *symbolic.Ref, fieldIdx int) symbolic.SymbolicExpression
 
+	AllocateArray(tp symbolic.ExpressionType) *symbolic.Ref
+
 	AssignToArray(ref *symbolic.Ref, index int, value symbolic.SymbolicExpression)
 
 	GetFromArray(ref *symbolic.Ref, index int) symbolic.SymbolicExpression
@@ -68,12 +70,6 @@ func (mem *SymbolicMemory) Allocate(tpe symbolic.ExpressionType) *symbolic.Ref {
 		rIdx := mem.getRefIdx(r)
 		mem.RefSegment = symbolic.NewArrayStore(mem.RefSegment, rIdx, rIdx)
 
-		return r
-	case symbolic.ArrayType:
-		// Массив считаем "array of int" (под твой [5]int/[]int)
-		r := symbolic.NewRef(mem.nextId(), symbolic.ArrayType)
-		mem.ArraysSegment[int(r.Idx)] =
-			symbolic.NewArray(fmt.Sprintf("Array_%d", r.Idx), symbolic.IntType)
 		return r
 	default:
 		//TODO implement me
@@ -149,6 +145,15 @@ func (mem *SymbolicMemory) GetFieldValue(ref *symbolic.Ref, fieldIdx int) symbol
 	curArr := FieldToArray[fieldIdx]
 
 	return symbolic.NewArrayAccess(curArr, symbolic.NewIntConstant(ref.Idx))
+}
+
+func (mem *SymbolicMemory) AllocateArray(tp symbolic.ExpressionType) *symbolic.Ref {
+	r := symbolic.NewRef(mem.nextId(), symbolic.ArrayType)
+
+	mem.ArraysSegment[int(r.Idx)] =
+		symbolic.NewArray(fmt.Sprintf("Array_%d", r.Idx), tp)
+
+	return r
 }
 
 func (mem *SymbolicMemory) AssignToArray(ref *symbolic.Ref, index int, value symbolic.SymbolicExpression) {
