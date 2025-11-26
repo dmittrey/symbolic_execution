@@ -121,6 +121,9 @@ func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *Bina
 	case lt == ArrayType && rt == ArrayType && (op == EQ || op == NE):
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 
+	case lt == RefType && rt == RefType && (op == EQ || op == NE):
+		return &BinaryOperation{Left: left.(*Ref).Idx, Right: right.(*Ref).Idx, Operator: op}
+
 	default:
 		panic(fmt.Errorf("binary op %v not supported for %v and %v", op, lt, rt))
 	}
@@ -288,7 +291,6 @@ type Array struct {
 }
 
 func NewArray(name string, valType ExpressionType) *Array {
-	print("Hello")
 	if valType != IntType && valType != BoolType && valType != StringType {
 		panic(fmt.Sprintf("Unexpected type %s", valType.String()))
 	}
@@ -300,7 +302,6 @@ func NewArray(name string, valType ExpressionType) *Array {
 }
 
 func NewArrayStore(array *Array, idx SymbolicExpression, val SymbolicExpression) *Array {
-	println(array.ValType)
 	if val.Type() != array.ValType {
 		panic(fmt.Sprintf("Array value must be %s", array.ValType.String()))
 	}
@@ -454,7 +455,7 @@ type Ref struct {
 func NewRef(idx int64, refType ExpressionType) *Ref {
 	return &Ref{
 		Idx:     NewSymbolicVariable(fmt.Sprint(idx), IntType),
-		RefType: refType,
+		RefType: RefType,
 	}
 }
 

@@ -36,6 +36,46 @@ func main() {
 		mem := memory.NewSymbolicMemory()
 
 		// Аналогично двум разным указателям foo1, foo2
+		foo1 := mem.ParamStructRef("Foo", []symbolic.ExpressionType{
+			symbolic.IntType, // a
+		})
+		foo2 := mem.AllocateStruct("Foo", []symbolic.ExpressionType{
+			symbolic.IntType, // a
+		})
+
+		// foo2.a = 5
+		mem.AssignField(foo2, 0, symbolic.NewIntConstant(5))
+		// foo1.a = 2
+		mem.AssignField(foo1, 0, symbolic.NewIntConstant(2))
+
+		// if foo2.a == 2 { ... }
+		foo2a := mem.GetFieldValue(foo2, 0)
+
+		cond := symbolic.NewBinaryOperation(
+			foo2a,
+			symbolic.NewIntConstant(2),
+			symbolic.EQ,
+		)
+
+		println(cond.String())
+
+		tr.AssertExpr(cond)
+
+		fmt.Println("== Z3 formula dump (Foo no-alias) ==")
+		fmt.Println(tr.SolverToString())
+
+		if m := mustSat(tr); m != nil {
+			fmt.Printf("Model:\n%s\n", m.String())
+		} else {
+			panic("Must be SAT")
+		}
+	})
+
+	// 12) UnSat
+	runTest("12) UNSAT", func(tr *translator.Z3Translator) {
+		mem := memory.NewSymbolicMemory()
+
+		// Аналогично двум разным указателям foo1, foo2
 		foo1 := mem.AllocateStruct("Foo", []symbolic.ExpressionType{
 			symbolic.IntType, // a
 		})
@@ -57,15 +97,17 @@ func main() {
 			symbolic.EQ,
 		)
 
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
+
 		tr.AssertExpr(cond)
 
 		fmt.Println("== Z3 formula dump (Foo no-alias) ==")
 		fmt.Println(tr.SolverToString())
 
 		if m := mustSat(tr); m != nil {
-			fmt.Printf("Model:\n%s\n", m.String())
-		} else {
-			panic("hello")
+			panic(fmt.Sprintf("Model:\n%s\n", m.String()))
 		}
 	})
 

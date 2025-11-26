@@ -10,6 +10,7 @@ const (
 	StringType
 	ArrayType
 	StructType
+	RefType
 )
 
 // String возвращает строковое представление типа
