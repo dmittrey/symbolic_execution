@@ -445,13 +445,13 @@ func (op LogicalOperator) String() string {
 }
 
 type Ref struct {
-	Idx     int64
+	Idx     *SymbolicVariable
 	RefType ExpressionType
 }
 
 func NewRef(idx int64, refType ExpressionType) *Ref {
 	return &Ref{
-		Idx:     idx,
+		Idx:     NewSymbolicVariable(fmt.Sprint(idx), IntType),
 		RefType: refType,
 	}
 }
@@ -461,7 +461,7 @@ func (r *Ref) Type() ExpressionType {
 }
 
 func (r *Ref) String() string {
-	return fmt.Sprintf("&%d", r.Idx)
+	return fmt.Sprintf("&%s", r.Idx.String())
 }
 
 func (r *Ref) Accept(visitor Visitor) interface{} {
