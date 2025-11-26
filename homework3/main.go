@@ -36,8 +36,12 @@ func main() {
 		mem := memory.NewSymbolicMemory()
 
 		// Аналогично двум разным указателям foo1, foo2
-		foo1 := mem.ParamRef(symbolic.BoolType)
-		foo2 := mem.ParamRef(symbolic.BoolType)
+		foo1 := mem.AllocateStruct("Foo", []symbolic.ExpressionType{
+			symbolic.IntType, // a
+		})
+		foo2 := mem.AllocateStruct("Foo", []symbolic.ExpressionType{
+			symbolic.IntType, // a
+		})
 
 		// foo2.a = 5
 		mem.AssignField(foo2, 0, symbolic.NewIntConstant(5))

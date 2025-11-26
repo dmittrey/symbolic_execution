@@ -288,6 +288,7 @@ type Array struct {
 }
 
 func NewArray(name string, valType ExpressionType) *Array {
+	print("Hello")
 	if valType != IntType && valType != BoolType && valType != StringType {
 		panic(fmt.Sprintf("Unexpected type %s", valType.String()))
 	}
@@ -299,6 +300,7 @@ func NewArray(name string, valType ExpressionType) *Array {
 }
 
 func NewArrayStore(array *Array, idx SymbolicExpression, val SymbolicExpression) *Array {
+	println(array.ValType)
 	if val.Type() != array.ValType {
 		panic(fmt.Sprintf("Array value must be %s", array.ValType.String()))
 	}
