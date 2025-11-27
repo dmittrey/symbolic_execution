@@ -449,18 +449,20 @@ func (op LogicalOperator) String() string {
 
 type Ref struct {
 	Idx     *SymbolicVariable
+	OwnType ExpressionType
 	RefType ExpressionType
 }
 
 func NewRef(idx int64, refType ExpressionType) *Ref {
 	return &Ref{
 		Idx:     NewSymbolicVariable(fmt.Sprint(idx), IntType),
-		RefType: RefType,
+		OwnType: RefType,
+		RefType: refType,
 	}
 }
 
 func (r *Ref) Type() ExpressionType {
-	return r.RefType
+	return r.OwnType
 }
 
 func (r *Ref) String() string {
@@ -468,7 +470,7 @@ func (r *Ref) String() string {
 }
 
 func (r *Ref) Accept(visitor Visitor) interface{} {
-	panic("implement me")
+	panic("Forbid to translate pure ref")
 }
 
 // StringConstant представляет строковую константу
