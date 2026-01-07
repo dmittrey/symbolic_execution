@@ -17,8 +17,9 @@ func testFunction(x int) int {
 	}
 }
 `
+	analyser := internal.NewAnalyser()
 
-	result := internal.Analyse(source, "testFunction")
+	result := analyser.Analyse(source, "testFunction")
 	for _, interpreter := range result {
 		fmt.Println(interpreter)
 	}
