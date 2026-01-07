@@ -52,13 +52,17 @@ func main() {
 			symbolic.EQ,
 		)
 
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
+
 		tr.AssertExpr(cond)
 
 		// fmt.Println("== Z3 formula dump (int) ==")
 		// fmt.Println(tr.SolverToString())
 
 		if m := mustSat(tr); m != nil {
-			fmt.Printf("Model:\n%s\n", m.String())
+			panic("")
 		}
 	})
 
@@ -83,6 +87,10 @@ func main() {
 			symbolic.EQ,
 		)
 
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
+
 		tr.AssertExpr(cond)
 
 		// fmt.Println("== Z3 formula dump (int) ==")
@@ -90,6 +98,8 @@ func main() {
 
 		if m := mustSat(tr); m != nil {
 			fmt.Printf("Model:\n%s\n", m.String())
+		} else {
+			panic("")
 		}
 	})
 
@@ -114,13 +124,17 @@ func main() {
 			symbolic.EQ,
 		)
 
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
+
 		tr.AssertExpr(cond)
 
 		// fmt.Println("== Z3 formula dump (bool) ==")
 		// fmt.Println(tr.SolverToString())
 
 		if m := mustSat(tr); m != nil {
-			fmt.Printf("Model:\n%s\n", m.String())
+			panic("")
 		}
 	})
 
@@ -145,6 +159,9 @@ func main() {
 			symbolic.EQ,
 		)
 
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
 		tr.AssertExpr(cond)
 
 		// fmt.Println("== Z3 formula dump (bool) ==")
@@ -152,6 +169,8 @@ func main() {
 
 		if m := mustSat(tr); m != nil {
 			fmt.Printf("Model:\n%s\n", m.String())
+		} else {
+			panic("")
 		}
 	})
 
@@ -180,6 +199,10 @@ func main() {
 		ageVal := mem.GetFieldValue(person, 1)
 		idVal := mem.GetFieldValue(person, 2)
 
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
+
 		// Проверяем:
 		// Name == "Alice"
 		tr.AssertExpr(symbolic.NewBinaryOperation(
@@ -207,6 +230,8 @@ func main() {
 
 		if m := mustSat(tr); m != nil {
 			fmt.Printf("Model:\n%s\n", m.String())
+		} else {
+			panic("")
 		}
 	})
 
@@ -253,6 +278,9 @@ func main() {
 		finalAge := mem.GetFieldValue(p, 1)
 		finalID := mem.GetFieldValue(p, 2)
 
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
 		// Проверяем семантику:
 		// finalName == name0
 		tr.AssertExpr(symbolic.NewBinaryOperation(
@@ -309,6 +337,10 @@ func main() {
 		finalName := mem.GetFieldValue(p, 0)
 		finalAge := mem.GetFieldValue(p, 1)
 		finalID := mem.GetFieldValue(p, 2)
+
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
 
 		tr.AssertExpr(symbolic.NewBinaryOperation(
 			finalName,
@@ -376,6 +408,9 @@ func main() {
 		finalAge := mem.GetFieldValue(p, 1)
 		finalID := mem.GetFieldValue(p, 2)
 
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
 		tr.AssertExpr(symbolic.NewBinaryOperation(
 			finalAge,
 			symbolic.NewBinaryOperation(age0, symbolic.NewIntConstant(10), symbolic.ADD),
@@ -440,6 +475,9 @@ func main() {
 		finalAge := mem.GetFieldValue(p, 1)
 		finalID := mem.GetFieldValue(p, 2)
 
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
 		tr.AssertExpr(symbolic.NewBinaryOperation(
 			finalName,
 			symbolic.NewStringConstant("Bob"),
@@ -472,6 +510,10 @@ func main() {
 
 		for i := 0; i < 5; i++ {
 			mem.AssignToArray(arr, i, symbolic.NewIntConstant(int64(i*i)))
+		}
+
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
 		}
 
 		// проверяем, что arr[i] == i*i
@@ -515,6 +557,10 @@ func main() {
 			mem.AssignToArray(arr, i, newVal)
 		}
 
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
+
 		// ожидаем: finalArr[i] == arr_i + 1
 		for i := 0; i < 5; i++ {
 			finalVal := mem.GetFromArray(arr, i)
@@ -538,8 +584,50 @@ func main() {
 		}
 	})
 
-	// 12) UNSAT: struct Foo prevent aliasing
-	runTest("12) UNSAT: struct Foo prevent aliasing", func(tr *translator.Z3Translator) {
+	// 12) Sat
+	runTest("12) SAT struct aliasing", func(tr *translator.Z3Translator) {
+		mem := memory.NewSymbolicMemory()
+
+		// Аналогично двум разным указателям foo1, foo2
+		foo1 := mem.ParamStructRef("Foo", []symbolic.ExpressionType{
+			symbolic.IntType, // a
+		})
+		foo2 := mem.ParamStructRef("Foo", []symbolic.ExpressionType{
+			symbolic.IntType, // a
+		})
+
+		// foo2.a = 5
+		mem.AssignField(foo2, 0, symbolic.NewIntConstant(5))
+		// foo1.a = 2
+		mem.AssignField(foo1, 0, symbolic.NewIntConstant(2))
+
+		// if foo2.a == 2 { ... }
+		foo2a := mem.GetFieldValue(foo2, 0)
+
+		cond := symbolic.NewBinaryOperation(
+			foo2a,
+			symbolic.NewIntConstant(2),
+			symbolic.EQ,
+		)
+
+		for _, c := range mem.Constraints() {
+			fmt.Printf("%s", c.String())
+			tr.AssertExpr(c)
+		}
+		tr.AssertExpr(cond)
+
+		fmt.Println("== Z3 formula dump (Foo no-alias) ==")
+		fmt.Println(tr.SolverToString())
+
+		if m := mustSat(tr); m != nil {
+			fmt.Printf("Model:\n%s\n", m.String())
+		} else {
+			panic("Must be SAT")
+		}
+	})
+
+	// 13) UnSat
+	runTest("13) UNSAT", func(tr *translator.Z3Translator) {
 		mem := memory.NewSymbolicMemory()
 
 		// Аналогично двум разным указателям foo1, foo2
@@ -564,47 +652,90 @@ func main() {
 			symbolic.EQ,
 		)
 
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
 		tr.AssertExpr(cond)
 
 		fmt.Println("== Z3 formula dump (Foo no-alias) ==")
 		fmt.Println(tr.SolverToString())
 
 		if m := mustSat(tr); m != nil {
-			fmt.Printf("Model:\n%s\n", m.String())
+			panic(fmt.Sprintf("Model:\n%s\n", m.String()))
 		}
 	})
 
-	// 13) SAT: struct Foo aliasing (foo1 == foo2)
-	runTest("13) SAT: struct Foo aliasing (same ref)", func(tr *translator.Z3Translator) {
+	// 14) SAT: array aliasing via ParamArrayRef
+	runTest("14) SAT: array aliasing (ParamArrayRef)", func(tr *translator.Z3Translator) {
 		mem := memory.NewSymbolicMemory()
 
-		// Один и тот же объект, два "параметра" указывают на него
-		foo1 := mem.AllocateStruct("Foo", []symbolic.ExpressionType{
-			symbolic.IntType, // a
-		})
-		foo2 := foo1 // алиас
+		// Аналог двух параметров вида arr1, arr2 [N]int
+		arr1 := mem.ParamArrayRef(symbolic.IntType)
+		arr2 := mem.ParamArrayRef(symbolic.IntType)
 
-		// foo2.a = 5
-		mem.AssignField(foo2, 0, symbolic.NewIntConstant(5))
-		// foo1.a = 2
-		mem.AssignField(foo1, 0, symbolic.NewIntConstant(2))
+		// arr2[0] = 5
+		mem.AssignToArray(arr2, 0, symbolic.NewIntConstant(5))
+		// arr1[0] = 2
+		mem.AssignToArray(arr1, 0, symbolic.NewIntConstant(2))
 
-		// if foo2.a == 2 { ... }
-		foo2a := mem.GetFieldValue(foo2, 0)
+		// if arr2[0] == 2 { ... }
+		valArr2Idx0 := mem.GetFromArray(arr2, 0)
+
+		valArr1Idx0 := mem.GetFromArray(arr1, 0)
 
 		cond := symbolic.NewBinaryOperation(
-			foo2a,
-			symbolic.NewIntConstant(2),
+			valArr2Idx0,
+			valArr1Idx0,
 			symbolic.EQ,
 		)
 
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
 		tr.AssertExpr(cond)
 
-		fmt.Println("== Z3 formula dump (Foo alias) ==")
+		fmt.Println("== Z3 formula dump (Array alias, ParamArrayRef) ==")
 		fmt.Println(tr.SolverToString())
 
 		if m := mustSat(tr); m != nil {
 			fmt.Printf("Model:\n%s\n", m.String())
+		} else {
+			panic("Must be SAT for ParamArrayRef aliasing")
+		}
+	})
+
+	// 15) UNSAT: array no-alias via AllocateArray
+	runTest("15) UNSAT: array no-alias (AllocateArray)", func(tr *translator.Z3Translator) {
+		mem := memory.NewSymbolicMemory()
+
+		// Аналог двух разных массивов, выделенных локально
+		arr1 := mem.AllocateArray(symbolic.IntType)
+		arr2 := mem.AllocateArray(symbolic.IntType)
+
+		// arr2[0] = 5
+		mem.AssignToArray(arr2, 0, symbolic.NewIntConstant(5))
+		// arr1[0] = 2
+		mem.AssignToArray(arr1, 0, symbolic.NewIntConstant(2))
+
+		// if arr2[0] == 2 { ... }
+		valArr2Idx0 := mem.GetFromArray(arr2, 0)
+
+		cond := symbolic.NewBinaryOperation(
+			valArr2Idx0,
+			symbolic.NewIntConstant(2),
+			symbolic.EQ,
+		)
+
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
+		tr.AssertExpr(cond)
+
+		fmt.Println("== Z3 formula dump (Array no-alias, AllocateArray) ==")
+		fmt.Println(tr.SolverToString())
+
+		if m := mustSat(tr); m != nil {
+			panic(fmt.Sprintf("Must be UNSAT for AllocateArray no-alias, but got model:\n%s\n", m.String()))
 		}
 	})
 
