@@ -51,8 +51,8 @@ type SymbolicMemory struct {
 	ArraysSegment map[int]*symbolic.Array
 }
 
-func NewSymbolicMemory() SymbolicMemory {
-	return SymbolicMemory{
+func NewSymbolicMemory() *SymbolicMemory {
+	return &SymbolicMemory{
 		LastIdx:     0,
 		Params:      make([]*symbolic.Ref, 0),
 		Allocations: make([]*symbolic.Ref, 0),
