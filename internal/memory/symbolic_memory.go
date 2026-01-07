@@ -6,6 +6,12 @@ import (
 )
 
 type Memory interface {
+	ParamRef(tpe symbolic.ExpressionType) *symbolic.Ref
+
+	ParamStructRef(name string, fields []symbolic.ExpressionType) *symbolic.Ref
+
+	ParamArrayRef(tp symbolic.ExpressionType) *symbolic.Ref
+
 	Allocate(tpe symbolic.ExpressionType) *symbolic.Ref
 
 	AllocateStruct(name string, fields []symbolic.ExpressionType) *symbolic.Ref
@@ -27,6 +33,7 @@ type Memory interface {
 
 type SymbolicMemory struct {
 	LastIdx     int
+	Params      []*symbolic.Ref
 	Allocations []*symbolic.Ref
 
 	// Primitives
@@ -47,6 +54,7 @@ type SymbolicMemory struct {
 func NewSymbolicMemory() SymbolicMemory {
 	return SymbolicMemory{
 		LastIdx:     0,
+		Params:      make([]*symbolic.Ref, 0),
 		Allocations: make([]*symbolic.Ref, 0),
 
 		IntSegment:  symbolic.NewArray("IntSegment", symbolic.IntType),
@@ -59,6 +67,46 @@ func NewSymbolicMemory() SymbolicMemory {
 
 		ArraysSegment: make(map[int]*symbolic.Array),
 	}
+}
+
+func (mem *SymbolicMemory) ParamRef(tpe symbolic.ExpressionType) *symbolic.Ref {
+	switch tpe {
+	case symbolic.IntType, symbolic.BoolType:
+		r := symbolic.NewRef(mem.nextId(), tpe)
+		mem.Params = append(mem.Params, r)
+		return r
+
+	default:
+		panic(fmt.Sprintf("Allocate: Use another allocation method for %s", tpe.String()))
+	}
+}
+
+func (mem *SymbolicMemory) ParamStructRef(name string, fields []symbolic.ExpressionType) *symbolic.Ref {
+	r := symbolic.NewRef(mem.nextId(), symbolic.StructType)
+	mem.Params = append(mem.Params, r)
+
+	typeIdx, ok := mem.TypeToInt[name]
+	if !ok {
+		typeIdx = int(mem.nextTypeId())
+		mem.TypeToInt[name] = typeIdx
+
+		mem.FieldsSegment[typeIdx] = make(map[int]*symbolic.Array)
+		for fieldIdx, tpe := range fields {
+			mem.FieldsSegment[typeIdx][fieldIdx] =
+				symbolic.NewArray(fmt.Sprintf("%s_%d", name, fieldIdx), tpe)
+		}
+	}
+
+	mem.RefToTypeIdx[r.Idx] = typeIdx
+
+	return r
+}
+
+func (mem *SymbolicMemory) ParamArrayRef(tp symbolic.ExpressionType) *symbolic.Ref {
+	r := symbolic.NewRef(mem.nextId(), symbolic.ArrayType)
+	mem.Params = append(mem.Params, r)
+
+	return r
 }
 
 func (mem *SymbolicMemory) Allocate(tpe symbolic.ExpressionType) *symbolic.Ref {
@@ -188,4 +236,28 @@ func (mem *SymbolicMemory) nextId() int64 {
 func (mem *SymbolicMemory) nextTypeId() int64 {
 	mem.LastTypeIdx++
 	return int64(mem.LastTypeIdx - 1)
+}
+
+func (mem *SymbolicMemory) Constraints() []symbolic.SymbolicExpression {
+	ops := make([]symbolic.SymbolicExpression, 0)
+
+	// params vs allocations
+	for _, vp := range mem.Params {
+		fmt.Printf("vp : %s\n", vp.String())
+		for _, va := range mem.Allocations {
+			fmt.Printf("\tva : %s\n", va.String())
+			ops = append(ops, symbolic.NewBinaryOperation(vp, va, symbolic.NE))
+		}
+	}
+
+	// pairwise allocations (важно не добавлять va != va)
+	for i := 0; i < len(mem.Allocations); i++ {
+		for j := i + 1; j < len(mem.Allocations); j++ {
+			ops = append(ops,
+				symbolic.NewBinaryOperation(mem.Allocations[i], mem.Allocations[j], symbolic.NE),
+			)
+		}
+	}
+
+	return ops
 }
