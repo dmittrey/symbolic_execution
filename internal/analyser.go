@@ -3,7 +3,9 @@ package internal
 import (
 	"fmt"
 	"log"
+	"symbolic-execution-course/internal/memory"
 	"symbolic-execution-course/internal/ssa"
+	"symbolic-execution-course/internal/symbolic"
 	"symbolic-execution-course/internal/translator"
 )
 
@@ -22,7 +24,7 @@ func NewAnalyser() Analyser {
 	}
 }
 
-func (an *Analyser) Analyse(source string, functionName string) []Interpreter {
+func (analyser *Analyser) Analyse(source string, functionName string) []Interpreter {
 	// Создаём builder для SSA
 	builder := ssa.NewBuilder()
 
@@ -32,4 +34,15 @@ func (an *Analyser) Analyse(source string, functionName string) []Interpreter {
 		log.Fatalf("Ошибка построения SSA: %v", err)
 	}
 	fmt.Printf("CFG построен для функции с %d блоками\n", len(fn.Blocks))
+
+	entry := fn.Blocks[0]
+	startState := Interpreter{
+		CallStack:     make([]CallStackFrame, 0),
+		Analyser:      analyser,
+		PathCondition: symbolic.NewBoolConstant(true),
+		Heap:          memory.NewSymbolicMemory(),
+	}
+	traverse_dfs(entry, 0, startState)
+
+	return nil
 }
