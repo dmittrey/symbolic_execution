@@ -8,17 +8,17 @@ import (
 type Memory interface {
 	Allocate(tpe symbolic.ExpressionType) *symbolic.Ref
 
+	AllocateStruct(name string, fields []symbolic.ExpressionType) *symbolic.Ref
+
+	AllocateArray(tp symbolic.ExpressionType) *symbolic.Ref
+
 	AssignValue(ref *symbolic.Ref, value symbolic.SymbolicExpression)
 
 	GetValue(ref *symbolic.Ref) symbolic.SymbolicExpression
 
-	AllocateStruct(name string, fields []symbolic.ExpressionType) *symbolic.Ref
-
 	AssignField(ref *symbolic.Ref, fieldIdx int, value symbolic.SymbolicExpression)
 
 	GetFieldValue(ref *symbolic.Ref, fieldIdx int) symbolic.SymbolicExpression
-
-	AllocateArray(tp symbolic.ExpressionType) *symbolic.Ref
 
 	AssignToArray(ref *symbolic.Ref, index int, value symbolic.SymbolicExpression)
 
@@ -26,35 +26,35 @@ type Memory interface {
 }
 
 type SymbolicMemory struct {
-	LastIdx         int
-	NotAliasingRefs []*symbolic.Ref
+	LastIdx     int
+	Allocations []*symbolic.Ref
 
-	RefSegment *symbolic.Array
-
+	// Primitives
 	IntSegment  *symbolic.Array
 	BoolSegment *symbolic.Array
 
+	// Structures
 	LastTypeIdx  int
-	RefToTypeIdx map[int]int
+	RefToTypeIdx map[*symbolic.SymbolicVariable]int
 	TypeToInt    map[string]int
 
 	FieldsSegment map[int]map[int]*symbolic.Array
 
+	// Arrays
 	ArraysSegment map[int]*symbolic.Array
 }
 
 func NewSymbolicMemory() SymbolicMemory {
 	return SymbolicMemory{
-		LastIdx:         0,
-		NotAliasingRefs: make([]*symbolic.Ref, 0),
-
-		RefSegment: symbolic.NewArray("RefSegment", symbolic.IntType),
+		LastIdx:     0,
+		Allocations: make([]*symbolic.Ref, 0),
 
 		IntSegment:  symbolic.NewArray("IntSegment", symbolic.IntType),
 		BoolSegment: symbolic.NewArray("BoolSegment", symbolic.BoolType),
 
-		RefToTypeIdx:  make(map[int]int),
-		TypeToInt:     make(map[string]int),
+		RefToTypeIdx: make(map[*symbolic.SymbolicVariable]int),
+		TypeToInt:    make(map[string]int),
+
 		FieldsSegment: make(map[int]map[int]*symbolic.Array),
 
 		ArraysSegment: make(map[int]*symbolic.Array),
@@ -65,44 +65,35 @@ func (mem *SymbolicMemory) Allocate(tpe symbolic.ExpressionType) *symbolic.Ref {
 	switch tpe {
 	case symbolic.IntType, symbolic.BoolType:
 		r := symbolic.NewRef(mem.nextId(), tpe)
-
-		// Prevent aliasing for primitives
-		rIdx := mem.getRefIdx(r)
-		mem.RefSegment = symbolic.NewArrayStore(mem.RefSegment, rIdx, rIdx)
-
+		mem.Allocations = append(mem.Allocations, r)
 		return r
+
 	default:
-		//TODO implement me
-		panic("implement me")
+		panic(fmt.Sprintf("Allocate: Use another allocation method for %s", tpe.String()))
 	}
 }
 
-// Ref lvalue -> SymExpr (primitive variant)
 func (mem *SymbolicMemory) AssignValue(ref *symbolic.Ref, value symbolic.SymbolicExpression) {
 	switch ref.RefType {
 	case symbolic.IntType:
-		IntSegmentIdx := symbolic.NewArrayAccess(mem.RefSegment, symbolic.NewIntConstant(ref.Idx))
+		mem.IntSegment = symbolic.NewArrayStore(mem.IntSegment, ref.Idx, value)
 
-		mem.IntSegment = symbolic.NewArrayStore(mem.IntSegment, IntSegmentIdx, value)
 	case symbolic.BoolType:
-		BoolSegmentIdx := symbolic.NewArrayAccess(mem.RefSegment, symbolic.NewIntConstant(ref.Idx))
+		mem.BoolSegment = symbolic.NewArrayStore(mem.BoolSegment, ref.Idx, value)
 
-		mem.BoolSegment = symbolic.NewArrayStore(mem.BoolSegment, BoolSegmentIdx, value)
 	default:
-		panic("AssignValue: Unsupported operation for type")
+		panic(fmt.Sprintf("AssignValue: Unsupported operation for type %d", ref.RefType))
 	}
 }
 
 func (mem *SymbolicMemory) GetValue(ref *symbolic.Ref) symbolic.SymbolicExpression {
 	switch ref.RefType {
 	case symbolic.IntType:
-		return symbolic.NewArrayAccess(
-			mem.IntSegment,
-			symbolic.NewArrayAccess(mem.RefSegment, symbolic.NewIntConstant(ref.Idx)))
+		return symbolic.NewArrayAccess(mem.IntSegment, ref.Idx)
+
 	case symbolic.BoolType:
-		return symbolic.NewArrayAccess(
-			mem.BoolSegment,
-			symbolic.NewArrayAccess(mem.RefSegment, symbolic.NewIntConstant(ref.Idx)))
+		return symbolic.NewArrayAccess(mem.BoolSegment, ref.Idx)
+
 	default:
 		panic("AssignValue: Unsupported operation for type")
 	}
@@ -110,6 +101,7 @@ func (mem *SymbolicMemory) GetValue(ref *symbolic.Ref) symbolic.SymbolicExpressi
 
 func (mem *SymbolicMemory) AllocateStruct(name string, fields []symbolic.ExpressionType) *symbolic.Ref {
 	r := symbolic.NewRef(mem.nextId(), symbolic.StructType)
+	mem.Allocations = append(mem.Allocations, r)
 
 	typeIdx, ok := mem.TypeToInt[name]
 	if !ok {
@@ -123,35 +115,33 @@ func (mem *SymbolicMemory) AllocateStruct(name string, fields []symbolic.Express
 		}
 	}
 
-	mem.RefToTypeIdx[int(r.Idx)] = typeIdx
+	mem.RefToTypeIdx[r.Idx] = typeIdx
 
 	return r
 }
 
 func (mem *SymbolicMemory) AssignField(ref *symbolic.Ref, fieldIdx int, value symbolic.SymbolicExpression) {
-	TypeIdx := mem.RefToTypeIdx[int(ref.Idx)]
+	TypeIdx := mem.RefToTypeIdx[ref.Idx]
 
 	FieldToArray := mem.FieldsSegment[TypeIdx]
 	curArr := FieldToArray[fieldIdx]
-	updArr := symbolic.NewArrayStore(curArr, symbolic.NewIntConstant(ref.Idx), value)
+	updArr := symbolic.NewArrayStore(curArr, ref.Idx, value)
 
 	mem.FieldsSegment[TypeIdx][fieldIdx] = updArr
 }
 
 func (mem *SymbolicMemory) GetFieldValue(ref *symbolic.Ref, fieldIdx int) symbolic.SymbolicExpression {
-	TypeIdx := mem.RefToTypeIdx[int(ref.Idx)]
+	TypeIdx := mem.RefToTypeIdx[ref.Idx]
 
 	FieldToArray := mem.FieldsSegment[TypeIdx]
 	curArr := FieldToArray[fieldIdx]
 
-	return symbolic.NewArrayAccess(curArr, symbolic.NewIntConstant(ref.Idx))
+	return symbolic.NewArrayAccess(curArr, ref.Idx)
 }
 
 func (mem *SymbolicMemory) AllocateArray(tp symbolic.ExpressionType) *symbolic.Ref {
 	r := symbolic.NewRef(mem.nextId(), symbolic.ArrayType)
-
-	mem.ArraysSegment[int(r.Idx)] =
-		symbolic.NewArray(fmt.Sprintf("Array_%d", r.Idx), tp)
+	mem.Allocations = append(mem.Allocations, r)
 
 	return r
 }
@@ -161,10 +151,11 @@ func (mem *SymbolicMemory) AssignToArray(ref *symbolic.Ref, index int, value sym
 		panic("AssignToArray: ref is not array")
 	}
 
-	arr := mem.ArraysSegment[int(ref.Idx)]
+	arr := mem.ArraysSegment[index]
 	if arr == nil {
-		// если вдруг не инициализирован – создаём, тип берём из value
-		arr = symbolic.NewArray(fmt.Sprintf("Array_%d", ref.Idx), value.Type())
+		// Если записи по одному и тому же
+		// 	индексу для разных рефов равны, то можно поалиасить рефы
+		arr = symbolic.NewArray(fmt.Sprintf("Array_%d", index), value.Type())
 	}
 
 	if arr.ValType != value.Type() {
@@ -172,8 +163,7 @@ func (mem *SymbolicMemory) AssignToArray(ref *symbolic.Ref, index int, value sym
 			value.Type().String(), arr.ValType.String()))
 	}
 
-	idxExpr := symbolic.NewIntConstant(int64(index))
-	mem.ArraysSegment[int(ref.Idx)] = symbolic.NewArrayStore(arr, idxExpr, value)
+	mem.ArraysSegment[index] = symbolic.NewArrayStore(arr, ref.Idx, value)
 }
 
 func (mem *SymbolicMemory) GetFromArray(ref *symbolic.Ref, index int) symbolic.SymbolicExpression {
@@ -181,19 +171,13 @@ func (mem *SymbolicMemory) GetFromArray(ref *symbolic.Ref, index int) symbolic.S
 		panic("GetFromArray: ref is not array")
 	}
 
-	arr := mem.ArraysSegment[int(ref.Idx)]
+	arr := mem.ArraysSegment[index]
 	if arr == nil {
-		// Лениво инициализируем массив int'ов
-		arr = symbolic.NewArray(fmt.Sprintf("Array_%d", ref.Idx), symbolic.IntType)
-		mem.ArraysSegment[int(ref.Idx)] = arr
+		arr = symbolic.NewArray(fmt.Sprintf("Array_%d", index), symbolic.IntType)
+		mem.ArraysSegment[index] = arr
 	}
 
-	idxExpr := symbolic.NewIntConstant(int64(index))
-	return symbolic.NewArrayAccess(arr, idxExpr)
-}
-
-func (mem *SymbolicMemory) getRefIdx(ref *symbolic.Ref) *symbolic.IntConstant {
-	return symbolic.NewIntConstant(ref.Idx)
+	return symbolic.NewArrayAccess(arr, ref.Idx)
 }
 
 func (mem *SymbolicMemory) nextId() int64 {
