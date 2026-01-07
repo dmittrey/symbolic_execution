@@ -121,6 +121,9 @@ func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *Bina
 	case lt == ArrayType && rt == ArrayType && (op == EQ || op == NE):
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 
+	case lt == RefType && rt == RefType && (op == EQ || op == NE):
+		return &BinaryOperation{Left: left.(*Ref).Idx, Right: right.(*Ref).Idx, Operator: op}
+
 	default:
 		panic(fmt.Errorf("binary op %v not supported for %v and %v", op, lt, rt))
 	}
@@ -446,18 +449,20 @@ func (op LogicalOperator) String() string {
 
 type Ref struct {
 	Idx     *SymbolicVariable
+	OwnType ExpressionType
 	RefType ExpressionType
 }
 
 func NewRef(idx int64, refType ExpressionType) *Ref {
 	return &Ref{
 		Idx:     NewSymbolicVariable(fmt.Sprint(idx), IntType),
+		OwnType: RefType,
 		RefType: refType,
 	}
 }
 
 func (r *Ref) Type() ExpressionType {
-	return r.RefType
+	return r.OwnType
 }
 
 func (r *Ref) String() string {
@@ -465,7 +470,7 @@ func (r *Ref) String() string {
 }
 
 func (r *Ref) Accept(visitor Visitor) interface{} {
-	panic("implement me")
+	panic("Forbid to translate pure ref")
 }
 
 // StringConstant представляет строковую константу
