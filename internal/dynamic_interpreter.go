@@ -1,9 +1,10 @@
 package internal
 
 import (
-	"golang.org/x/tools/go/ssa"
 	"symbolic-execution-course/internal/memory"
 	"symbolic-execution-course/internal/symbolic"
+
+	"golang.org/x/tools/go/ssa"
 )
 
 type Interpreter struct {
