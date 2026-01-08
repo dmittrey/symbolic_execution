@@ -18,6 +18,15 @@ type Interpreter struct {
 	Heap          memory.Memory
 }
 
+func NewInterpreter(analyser *Analyser, pathCond symbolic.SymbolicExpression) Interpreter {
+	return Interpreter{
+		CallStack:     make([]CallStackFrame, 0),
+		Analyser:      analyser,
+		PathCondition: pathCond,
+		Heap:          memory.NewSymbolicMemory(),
+	}
+}
+
 type CallStackFrame struct {
 	Function    *ssa.Function
 	LocalMemory map[string]symbolic.SymbolicExpression

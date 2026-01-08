@@ -4,7 +4,6 @@ import (
 	"container/heap"
 	"fmt"
 	"log"
-	"symbolic-execution-course/internal/memory"
 	"symbolic-execution-course/internal/ssa"
 	"symbolic-execution-course/internal/symbolic"
 	"symbolic-execution-course/internal/translator"
@@ -44,12 +43,7 @@ func (analyser *Analyser) Analyse(source string, functionName string) []Interpre
 	heap.Init(&pq)
 
 	// Подготовить Item
-	startState := Interpreter{
-		CallStack:     make([]CallStackFrame, 0),
-		Analyser:      analyser,
-		PathCondition: symbolic.NewBoolConstant(true),
-		Heap:          memory.NewSymbolicMemory(),
-	}
+	startState := NewInterpreter(analyser, symbolic.NewBoolConstant(true))
 
 	// Запушить Item
 	heap.Push(&pq, &Item{
