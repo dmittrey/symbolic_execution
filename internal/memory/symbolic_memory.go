@@ -266,7 +266,7 @@ func (mem *SymbolicMemory) Constraints() []symbolic.SymbolicExpression {
 
 	// params vs allocations
 	for _, vp := range mem.Params {
-		fmt.Printf("vp : %s\n", vp.String())
+		// fmt.Printf("vp : %s\n", vp.String())
 		for _, va := range mem.Allocations {
 			fmt.Printf("\tva : %s\n", va.String())
 			ops = append(ops, symbolic.NewBinaryOperation(vp, va, symbolic.NE))

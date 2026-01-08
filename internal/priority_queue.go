@@ -1,8 +1,6 @@
 package internal
 
 import (
-	"container/heap"
-
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -43,10 +41,4 @@ func (pq *PriorityQueue) Pop() interface{} {
 	item.index = -1
 	*pq = old[0 : n-1]
 	return item
-}
-
-func (pq *PriorityQueue) update(item *Item, value Interpreter, priority int) {
-	item.value = value
-	item.priority = priority
-	heap.Fix(pq, item.index)
 }
