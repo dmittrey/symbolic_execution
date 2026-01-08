@@ -42,7 +42,17 @@ func (analyser *Analyser) Analyse(source string, functionName string) []Interpre
 		PathCondition: symbolic.NewBoolConstant(true),
 		Heap:          memory.NewSymbolicMemory(),
 	}
-	traverse_dfs(entry, 0, startState)
+
+	// TODO migrate to priority queue
+	var out = []Interpreter{startState}
+	for i, ins := range entry.Instrs {
+		var curOut = make([]Interpreter, 0)
+		fmt.Printf("[%d] %T: %s\n", i, ins, ins.String())
+		for _, v := range out {
+			curOut = append(curOut, v.interpretDynamically(ins)...)
+		}
+		out = curOut
+	}
 
 	return nil
 }
