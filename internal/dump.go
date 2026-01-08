@@ -44,8 +44,8 @@ func (st Interpreter) Dump() string {
 
 		// constraints (если хочешь)
 		cs := mem.Constraints()
+		fmt.Fprintf(&b, "  HeapConstraints: %d\n", len(cs))
 		if len(cs) > 0 {
-			fmt.Fprintf(&b, "  HeapConstraints: %d\n", len(cs))
 			for i, c := range cs {
 				fmt.Fprintf(&b, "    C[%d]: %s\n", i, safeExpr(c))
 			}
