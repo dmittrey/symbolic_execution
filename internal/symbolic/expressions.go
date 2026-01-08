@@ -163,8 +163,8 @@ type LogicalOperation struct {
 
 func NewLogicalOperation(operands []SymbolicExpression, op LogicalOperator) *LogicalOperation {
 	for _, o := range operands {
-		if o.Type() != BoolType {
-			panic("logical operation expects bool operands")
+		if o.Type() != BoolType && o.Type() != RefType {
+			panic(fmt.Sprintf("logical operation expects bool operands %s %s", o.Type().String(), o.String()))
 		}
 	}
 	switch op {
@@ -471,7 +471,7 @@ func (r *Ref) String() string {
 }
 
 func (r *Ref) Accept(visitor Visitor) interface{} {
-	panic("Forbid to translate pure ref")
+	return visitor.VisitVariable(r.Idx)
 }
 
 // StringConstant представляет строковую константу

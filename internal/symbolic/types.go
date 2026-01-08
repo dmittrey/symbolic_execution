@@ -26,6 +26,8 @@ func (et ExpressionType) String() string {
 		return "array"
 	case StructType:
 		return "struct"
+	case RefType:
+		return "ref"
 	default:
 		return "unknown"
 	}
