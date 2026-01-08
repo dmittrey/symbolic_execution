@@ -471,7 +471,7 @@ func (r *Ref) String() string {
 }
 
 func (r *Ref) Accept(visitor Visitor) interface{} {
-	return visitor.VisitVariable(r.Idx)
+	panic("Forbid to translate pure ref")
 }
 
 // StringConstant представляет строковую константу

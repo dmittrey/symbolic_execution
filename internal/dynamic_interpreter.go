@@ -105,7 +105,8 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	switch v := value.(type) {
 	// A Parameter represents an input parameter of a function.
 	case *ssa.Parameter:
-		return interpreter.Heap.ParamRef(v.Name(), goTypeToSym(v.Type()))
+		ref := interpreter.Heap.ParamRef(v.Name(), goTypeToSym(v.Type()))
+		return interpreter.Heap.GetValue(ref)
 
 	// IntConstant, BoolConstant, StringConstant
 	case *ssa.Const:
