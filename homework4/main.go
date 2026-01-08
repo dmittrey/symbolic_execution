@@ -20,7 +20,7 @@ func testFunction(x int) int {
 	analyser := internal.NewAnalyser()
 
 	result := analyser.Analyse(source, "testFunction")
-	for _, interpreter := range result {
-		fmt.Println(interpreter)
+	for _, st := range result {
+		fmt.Println(st.Dump())
 	}
 }
