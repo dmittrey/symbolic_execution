@@ -62,23 +62,19 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 		return out
 	case *ssa.If:
 		cond := interpreter.resolveExpression(i.Cond)
-		fmt.Printf("[Cond]: %s\n", cond.String())
 
 		out := make([]*Item, 0, 2)
 
 		// then -> Succs[0]
 		if len(i.Block().Succs) >= 1 {
-			fmt.Printf("[Found then branch]\n")
 			thenState := *interpreter // копия
 			thenState.PathCondition = symbolic.NewLogicalOperation(
 				[]symbolic.SymbolicExpression{thenState.PathCondition, cond},
 				symbolic.AND,
 			)
-			fmt.Printf("[thenState PC]: %s\n", thenState.PathCondition.String())
 			out = append(out, &Item{value: thenState, block: block.Succs[0], instrIdx: 0})
 		}
 		if len(i.Block().Succs) >= 2 {
-			fmt.Printf("[Found else branch]\n")
 			elseState := *interpreter // копия
 			notCond := symbolic.NewLogicalOperation(
 				[]symbolic.SymbolicExpression{cond},
@@ -88,13 +84,12 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 				[]symbolic.SymbolicExpression{elseState.PathCondition, notCond},
 				symbolic.AND,
 			)
-			fmt.Printf("[elseState PC]: %s\n", elseState.PathCondition.String())
 			out = append(out, &Item{value: elseState, block: block.Succs[1], instrIdx: 0})
 		}
 		return out
 	case *ssa.BinOp:
-		symExpr := interpreter.resolveExpression(i)
-		fmt.Printf("SymExpr: %s\n", symExpr.String())
+		// symExpr := interpreter.resolveExpression(i)
+		// fmt.Printf("SymExpr: %s\n", symExpr.String())
 		return nextInSameBlock(*interpreter, block, instrIdx)
 	default:
 		panic(fmt.Sprintf("Support %T!", i))
