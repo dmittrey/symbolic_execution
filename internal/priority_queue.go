@@ -7,10 +7,10 @@ import (
 )
 
 type Item struct {
-	value    Interpreter
-	nextBB   *ssa.BasicBlock
-	priority int
-	index    int
+	value     Interpreter
+	nextInstr *ssa.Instruction
+	priority  int
+	index     int
 }
 
 type PriorityQueue []*Item
