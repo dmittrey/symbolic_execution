@@ -1,9 +1,14 @@
 package internal
 
-import "container/heap"
+import (
+	"container/heap"
+
+	"golang.org/x/tools/go/ssa"
+)
 
 type Item struct {
 	value    Interpreter
+	nextBB   *ssa.BasicBlock
 	priority int
 	index    int
 }
