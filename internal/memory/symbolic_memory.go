@@ -6,11 +6,11 @@ import (
 )
 
 type Memory interface {
-	ParamRef(tpe symbolic.ExpressionType) *symbolic.Ref
+	ParamRef(name string, tpe symbolic.ExpressionType) *symbolic.Ref
 
-	ParamStructRef(name string, fields []symbolic.ExpressionType) *symbolic.Ref
+	ParamStructRef(name string, typeName string, fields []symbolic.ExpressionType) *symbolic.Ref
 
-	ParamArrayRef(tp symbolic.ExpressionType) *symbolic.Ref
+	ParamArrayRef(name string, tp symbolic.ExpressionType) *symbolic.Ref
 
 	Allocate(tpe symbolic.ExpressionType) *symbolic.Ref
 
@@ -32,9 +32,10 @@ type Memory interface {
 }
 
 type SymbolicMemory struct {
-	LastIdx     int
-	Params      []*symbolic.Ref
-	Allocations []*symbolic.Ref
+	LastIdx        int
+	ParamNameToRef map[string]*symbolic.Ref
+	Params         []*symbolic.Ref
+	Allocations    []*symbolic.Ref
 
 	// Primitives
 	IntSegment  *symbolic.Array
@@ -53,9 +54,10 @@ type SymbolicMemory struct {
 
 func NewSymbolicMemory() *SymbolicMemory {
 	return &SymbolicMemory{
-		LastIdx:     0,
-		Params:      make([]*symbolic.Ref, 0),
-		Allocations: make([]*symbolic.Ref, 0),
+		LastIdx:        0,
+		ParamNameToRef: make(map[string]*symbolic.Ref), //Cache to prevent duplicate same params in memory
+		Params:         make([]*symbolic.Ref, 0),
+		Allocations:    make([]*symbolic.Ref, 0),
 
 		IntSegment:  symbolic.NewArray("IntSegment", symbolic.IntType),
 		BoolSegment: symbolic.NewArray("BoolSegment", symbolic.BoolType),
@@ -69,11 +71,18 @@ func NewSymbolicMemory() *SymbolicMemory {
 	}
 }
 
-func (mem *SymbolicMemory) ParamRef(tpe symbolic.ExpressionType) *symbolic.Ref {
+func (mem *SymbolicMemory) ParamRef(name string, tpe symbolic.ExpressionType) *symbolic.Ref {
+	r, ok := mem.ParamNameToRef[name]
+	if ok {
+		// If Ref is found by name, return it, otherwirse go to create new
+		return r
+	}
+
 	switch tpe {
 	case symbolic.IntType, symbolic.BoolType:
 		r := symbolic.NewRef(mem.nextId(), tpe)
 		mem.Params = append(mem.Params, r)
+		mem.ParamNameToRef[name] = r
 		return r
 
 	default:
@@ -81,30 +90,44 @@ func (mem *SymbolicMemory) ParamRef(tpe symbolic.ExpressionType) *symbolic.Ref {
 	}
 }
 
-func (mem *SymbolicMemory) ParamStructRef(name string, fields []symbolic.ExpressionType) *symbolic.Ref {
-	r := symbolic.NewRef(mem.nextId(), symbolic.StructType)
+func (mem *SymbolicMemory) ParamStructRef(name string, typeName string, fields []symbolic.ExpressionType) *symbolic.Ref {
+	r, ok := mem.ParamNameToRef[name]
+	if ok {
+		// If Ref is found by name, return it, otherwirse go to create new
+		return r
+	}
+
+	r = symbolic.NewRef(mem.nextId(), symbolic.StructType)
 	mem.Params = append(mem.Params, r)
 
-	typeIdx, ok := mem.TypeToInt[name]
+	typeIdx, ok := mem.TypeToInt[typeName]
 	if !ok {
 		typeIdx = int(mem.nextTypeId())
-		mem.TypeToInt[name] = typeIdx
+		mem.TypeToInt[typeName] = typeIdx
 
 		mem.FieldsSegment[typeIdx] = make(map[int]*symbolic.Array)
 		for fieldIdx, tpe := range fields {
 			mem.FieldsSegment[typeIdx][fieldIdx] =
-				symbolic.NewArray(fmt.Sprintf("%s_%d", name, fieldIdx), tpe)
+				symbolic.NewArray(fmt.Sprintf("%s_%d", typeName, fieldIdx), tpe)
 		}
 	}
 
 	mem.RefToTypeIdx[r.Idx] = typeIdx
+	mem.ParamNameToRef[name] = r
 
 	return r
 }
 
-func (mem *SymbolicMemory) ParamArrayRef(tp symbolic.ExpressionType) *symbolic.Ref {
-	r := symbolic.NewRef(mem.nextId(), symbolic.ArrayType)
+func (mem *SymbolicMemory) ParamArrayRef(name string, tp symbolic.ExpressionType) *symbolic.Ref {
+	r, ok := mem.ParamNameToRef[name]
+	if ok {
+		// If Ref is found by name, return it, otherwirse go to create new
+		return r
+	}
+
+	r = symbolic.NewRef(mem.nextId(), symbolic.ArrayType)
 	mem.Params = append(mem.Params, r)
+	mem.ParamNameToRef[name] = r
 
 	return r
 }
