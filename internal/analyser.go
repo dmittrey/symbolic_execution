@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"container/heap"
 	"fmt"
 	"log"
 	"symbolic-execution-course/internal/memory"
@@ -35,7 +36,14 @@ func (analyser *Analyser) Analyse(source string, functionName string) []Interpre
 	}
 	fmt.Printf("CFG построен для функции с %d блоками\n", len(fn.Blocks))
 
-	entry := fn.Blocks[0]
+	// создать пустую очередь
+	selector := NewDfsPathSelector()
+
+	// инициализировать как heap
+	pq := make(PriorityQueue, 0)
+	heap.Init(&pq)
+
+	// Подготовить Item
 	startState := Interpreter{
 		CallStack:     make([]CallStackFrame, 0),
 		Analyser:      analyser,
@@ -43,16 +51,33 @@ func (analyser *Analyser) Analyse(source string, functionName string) []Interpre
 		Heap:          memory.NewSymbolicMemory(),
 	}
 
-	// TODO migrate to priority queue
-	var out = []Interpreter{startState}
-	for i, ins := range entry.Instrs {
-		var curOut = make([]Interpreter, 0)
-		fmt.Printf("[%d] %T: %s\n", i, ins, ins.String())
-		for _, v := range out {
-			curOut = append(curOut, v.interpretDynamically(ins)...)
+	// Запушить Item
+	heap.Push(&pq, &Item{
+		value:    startState,
+		block:    fn.Blocks[0],
+		instrIdx: 0,
+		priority: selector.CalculatePriority(startState),
+	})
+
+	results := make([]Interpreter, 0)
+
+	for pq.Len() > 0 {
+		it := heap.Pop(&pq).(*Item)
+
+		// finished?
+		if it.block == nil {
+			results = append(results, it.value)
+			continue
 		}
-		out = curOut
+
+		st := it.value
+		nextItems := (&st).interpretDynamically(it.block, it.instrIdx)
+
+		for _, ni := range nextItems {
+			ni.priority = selector.CalculatePriority(ni.value)
+			heap.Push(&pq, ni)
+		}
 	}
 
-	return nil
+	return results
 }

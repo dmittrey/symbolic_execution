@@ -24,7 +24,13 @@ type CallStackFrame struct {
 	ReturnValue symbolic.SymbolicExpression
 }
 
-func (interpreter *Interpreter) interpretDynamically(instr ssa.Instruction) []Interpreter {
+func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, instrIdx int) []*Item {
+	if block == nil || instrIdx < 0 || instrIdx >= len(block.Instrs) {
+		return nil
+	}
+
+	instr := block.Instrs[instrIdx]
+
 	if instr == nil {
 		fmt.Println("interpretDynamically with nil!")
 		return nil
@@ -32,17 +38,26 @@ func (interpreter *Interpreter) interpretDynamically(instr ssa.Instruction) []In
 
 	switch i := instr.(type) {
 	case *ssa.Return:
-		panic("Support me!")
+		return []*Item{{value: *interpreter, block: nil, instrIdx: -1}}
 	case *ssa.Panic:
-		panic("Support me!")
+		return []*Item{{value: *interpreter, block: nil, instrIdx: -1}}
 	case *ssa.Select:
 		panic("Support me!")
 	case *ssa.Store:
 		panic("Support me!")
+	case *ssa.Jump:
+		out := make([]*Item, 0, len(block.Succs))
+		for _, s := range block.Succs {
+			out = append(out, &Item{value: *interpreter, block: s, instrIdx: 0})
+		}
+		return out
 	case *ssa.If:
 		cond := interpreter.resolveExpression(i.Cond)
 		fmt.Printf("[Cond]: %s\n", cond.String())
-		out := make([]Interpreter, 0)
+
+		out := make([]*Item, 0, 2)
+
+		// then -> Succs[0]
 		if len(i.Block().Succs) >= 1 {
 			fmt.Printf("[Found then branch]\n")
 			thenState := *interpreter // копия
@@ -51,7 +66,7 @@ func (interpreter *Interpreter) interpretDynamically(instr ssa.Instruction) []In
 				symbolic.AND,
 			)
 			fmt.Printf("[thenState PC]: %s\n", thenState.PathCondition.String())
-			out = append(out, thenState)
+			out = append(out, &Item{value: thenState, block: block.Succs[0], instrIdx: 0})
 		}
 		if len(i.Block().Succs) >= 2 {
 			fmt.Printf("[Found else branch]\n")
@@ -65,13 +80,13 @@ func (interpreter *Interpreter) interpretDynamically(instr ssa.Instruction) []In
 				symbolic.AND,
 			)
 			fmt.Printf("[elseState PC]: %s\n", elseState.PathCondition.String())
-			out = append(out, elseState)
+			out = append(out, &Item{value: elseState, block: block.Succs[1], instrIdx: 0})
 		}
 		return out
 	case *ssa.BinOp:
 		symExpr := interpreter.resolveExpression(i)
 		fmt.Printf("SymExpr: %s\n", symExpr.String())
-		return []Interpreter{*interpreter}
+		return nextInSameBlock(*interpreter, block, instrIdx)
 	default:
 		panic(fmt.Sprintf("Support %T!", i))
 	}
@@ -218,4 +233,17 @@ func goTypeToSym(t types.Type) symbolic.ExpressionType {
 	}
 	// упрощение: всё неизвестное как Int
 	return symbolic.IntType
+}
+
+func nextInSameBlock(st Interpreter, block *ssa.BasicBlock, instrIdx int) []*Item {
+	nxt := instrIdx + 1
+	if nxt < len(block.Instrs) {
+		return []*Item{{value: st, block: block, instrIdx: nxt}}
+	}
+	// если вдруг дошли до конца (редко), можно уйти по succs
+	out := make([]*Item, 0, len(block.Succs))
+	for _, s := range block.Succs {
+		out = append(out, &Item{value: st, block: s, instrIdx: 0})
+	}
+	return out
 }
