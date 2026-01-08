@@ -125,7 +125,8 @@ func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *Bina
 		return &BinaryOperation{Left: left.(*Ref).Idx, Right: right.(*Ref).Idx, Operator: op}
 
 	default:
-		panic(fmt.Errorf("binary op %v not supported for %v and %v", op, lt, rt))
+		return &BinaryOperation{Left: left, Right: right, Operator: op}
+		// panic(fmt.Errorf("binary op %v not supported for %s(%v) and %s(%v)", op, left, lt, right, rt))
 	}
 }
 
