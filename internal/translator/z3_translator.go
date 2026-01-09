@@ -3,7 +3,6 @@ package translator
 
 import (
 	"fmt"
-	"math/big"
 	"strconv"
 	"symbolic-execution-course/internal/symbolic"
 
@@ -17,6 +16,7 @@ type Z3Translator struct {
 	config     *z3.Config
 	vars       map[string]z3.Value // Кэш переменных
 	stringSort z3.Sort
+	bvSort     z3.Sort
 
 	arraysInProgress map[*symbolic.Array]bool
 }
@@ -33,6 +33,7 @@ func NewZ3Translator() *Z3Translator {
 		config:           config,
 		vars:             make(map[string]z3.Value),
 		stringSort:       ctx.UninterpretedSort("String"),
+		bvSort:           ctx.BVSort(64),
 		arraysInProgress: make(map[*symbolic.Array]bool),
 	}
 }
@@ -140,7 +141,7 @@ func (zt *Z3Translator) VisitVariable(expr *symbolic.SymbolicVariable) interface
 
 // VisitIntConstant транслирует целочисленную константу в Z3
 func (zt *Z3Translator) VisitIntConstant(expr *symbolic.IntConstant) interface{} {
-	return zt.ctx.FromBigInt(big.NewInt(expr.Value), zt.ctx.IntSort())
+	return zt.ctx.FromInt(expr.Value, zt.bvSort)
 }
 
 // VisitBoolConstant транслирует булеву константу в Z3
@@ -160,10 +161,10 @@ func (zt *Z3Translator) VisitBinaryOperation(expr *symbolic.BinaryOperation) int
 		panic("VisitBinaryOperation: Unable to translate right operand.")
 	}
 
-	if leftZ3i, ok := leftZ3.(z3.Int); ok {
-		rightZ3i, ok := rightZ3.(z3.Int)
+	if leftZ3i, ok := leftZ3.(z3.BV); ok {
+		rightZ3i, ok := rightZ3.(z3.BV)
 		if !ok {
-			panic("VisitBinaryOperation: both operands must be Int")
+			panic("VisitBinaryOperation: both operands must be BV")
 		}
 
 		switch expr.Operator {
@@ -175,9 +176,23 @@ func (zt *Z3Translator) VisitBinaryOperation(expr *symbolic.BinaryOperation) int
 		case symbolic.MUL:
 			return leftZ3i.Mul(rightZ3i)
 		case symbolic.DIV:
-			return leftZ3i.Div(rightZ3i)
-		case symbolic.MOD:
-			return leftZ3i.Mod(rightZ3i)
+			return leftZ3i.SDiv(rightZ3i)
+		case symbolic.REM:
+			return leftZ3i.SRem(rightZ3i)
+
+		// Логические операторы
+		case symbolic.AND:
+			return leftZ3i.And(rightZ3i)
+		case symbolic.OR:
+			return leftZ3i.Or(rightZ3i)
+		case symbolic.XOR:
+			return leftZ3i.Xor(rightZ3i)
+		case symbolic.SHL:
+			return leftZ3i.Lsh(rightZ3i)
+		case symbolic.SHR:
+			return leftZ3i.SRsh(rightZ3i)
+		case symbolic.AND_NOT:
+			return leftZ3i.And(rightZ3i).Not()
 
 		// Операторы сравнения
 		case symbolic.EQ:
@@ -185,13 +200,13 @@ func (zt *Z3Translator) VisitBinaryOperation(expr *symbolic.BinaryOperation) int
 		case symbolic.NE:
 			return leftZ3i.NE(rightZ3i)
 		case symbolic.LT:
-			return leftZ3i.LT(rightZ3i)
+			return leftZ3i.SLT(rightZ3i)
 		case symbolic.LE:
-			return leftZ3i.LE(rightZ3i)
+			return leftZ3i.SLE(rightZ3i)
 		case symbolic.GT:
-			return leftZ3i.GT(rightZ3i)
+			return leftZ3i.SGT(rightZ3i)
 		case symbolic.GE:
-			return leftZ3i.GE(rightZ3i)
+			return leftZ3i.SGE(rightZ3i)
 
 		default:
 			panic("Not impl.")
@@ -205,6 +220,18 @@ func (zt *Z3Translator) VisitBinaryOperation(expr *symbolic.BinaryOperation) int
 		}
 
 		switch expr.Operator {
+		// Логические операторы
+		case symbolic.AND:
+			return leftZ3b.And(rightZ3b)
+		case symbolic.OR:
+			return leftZ3b.Or(rightZ3b)
+		case symbolic.XOR:
+			return leftZ3b.Xor(rightZ3b)
+		case symbolic.AND_NOT:
+			return leftZ3b.And(rightZ3b).Not()
+		case symbolic.IMPLIES:
+			return leftZ3b.Implies(rightZ3b)
+
 		// Операторы сравнения
 		case symbolic.EQ:
 			return leftZ3b.Eq(rightZ3b)
@@ -213,6 +240,26 @@ func (zt *Z3Translator) VisitBinaryOperation(expr *symbolic.BinaryOperation) int
 
 		default:
 			panic("Not impl.")
+		}
+	}
+
+	if expr.Left.Type() == symbolic.StringType && expr.Right.Type() == symbolic.StringType {
+		lu, ok := leftZ3.(z3.Uninterpreted)
+		if !ok {
+			panic("VisitBinaryOperation: left string is not z3.Uninterpreted")
+		}
+		ru, ok := rightZ3.(z3.Uninterpreted)
+		if !ok {
+			panic("VisitBinaryOperation: right string is not z3.Uninterpreted")
+		}
+
+		switch expr.Operator {
+		case symbolic.EQ:
+			return lu.Eq(ru)
+		case symbolic.NE:
+			return lu.NE(ru)
+		default:
+			panic("VisitBinaryOperation: unsupported operator for string")
 		}
 	}
 
@@ -234,64 +281,7 @@ func (zt *Z3Translator) VisitBinaryOperation(expr *symbolic.BinaryOperation) int
 		}
 	}
 
-	// --- строки: Uninterpreted ---
-	if expr.Left.Type() == symbolic.StringType && expr.Right.Type() == symbolic.StringType {
-		lu, ok := leftZ3.(z3.Uninterpreted)
-		if !ok {
-			panic("VisitBinaryOperation: left string is not z3.Uninterpreted")
-		}
-		ru, ok := rightZ3.(z3.Uninterpreted)
-		if !ok {
-			panic("VisitBinaryOperation: right string is not z3.Uninterpreted")
-		}
-
-		switch expr.Operator {
-		case symbolic.EQ:
-			return lu.Eq(ru)
-		case symbolic.NE:
-			return lu.NE(ru)
-		default:
-			panic("VisitBinaryOperation: unsupported operator for string")
-		}
-	}
-
 	panic("Not impl type.")
-}
-
-// VisitLogicalOperation транслирует логическую операцию в Z3
-func (zt *Z3Translator) VisitLogicalOperation(expr *symbolic.LogicalOperation) interface{} {
-	ops := make([]z3.Bool, 0, len(expr.Operands))
-	for _, opnd := range expr.Operands {
-		v, err := zt.TranslateExpression(opnd)
-		if err != nil {
-			panic("VisitLogicalOperation: translation error")
-		}
-		b, ok := v.(z3.Bool)
-		if !ok {
-			panic("VisitLogicalOperation: expected boolean operand")
-		}
-		ops = append(ops, b)
-	}
-
-	switch expr.Operator {
-	case symbolic.AND:
-		return ops[0].And(ops[1:]...)
-	case symbolic.OR:
-		return ops[0].Or(ops[1:]...)
-	case symbolic.NOT:
-		if len(ops) != 1 {
-			panic("NOT expects 1 operand")
-		}
-		return ops[0].Not()
-	case symbolic.IMPLIES:
-		if len(ops) != 2 {
-			panic("IMPLIES expects 2 operands")
-		}
-		return ops[0].Implies(ops[1])
-
-	default:
-		panic("Not impl.")
-	}
 }
 
 func (zt *Z3Translator) VisitFunctionCall(expr *symbolic.FunctionCall) interface{} {
@@ -319,7 +309,7 @@ func (zt *Z3Translator) VisitFunctionCall(expr *symbolic.FunctionCall) interface
 	for i, a := range expr.Args {
 		switch a.Type() {
 		case symbolic.IntType:
-			domain[i] = zt.ctx.IntSort()
+			domain[i] = zt.bvSort
 		case symbolic.BoolType:
 			domain[i] = zt.ctx.BoolSort()
 		default:
@@ -331,7 +321,7 @@ func (zt *Z3Translator) VisitFunctionCall(expr *symbolic.FunctionCall) interface
 	var rng z3.Sort
 	switch expr.RetType {
 	case symbolic.IntType:
-		rng = zt.ctx.IntSort()
+		rng = zt.bvSort
 	case symbolic.BoolType:
 		rng = zt.ctx.BoolSort()
 	default:
@@ -383,13 +373,13 @@ func (zt *Z3Translator) VisitConditionalExpression(expr *symbolic.ConditionalExp
 
 func (zt *Z3Translator) VisitArray(expr *symbolic.Array) interface{} {
 	// Индексный сорт — Int
-	idxSort := zt.ctx.IntSort()
+	idxSort := zt.bvSort
 
 	// Сорт элементов
 	var elemSort z3.Sort
 	switch expr.ValType {
 	case symbolic.IntType:
-		elemSort = zt.ctx.IntSort()
+		elemSort = zt.bvSort
 	case symbolic.BoolType:
 		elemSort = zt.ctx.BoolSort()
 	case symbolic.StringType:
@@ -471,13 +461,13 @@ func (zt *Z3Translator) VisitStringConstant(c *symbolic.StringConstant) interfac
 func (zt *Z3Translator) createZ3Variable(name string, exprType symbolic.ExpressionType) z3.Value {
 	switch exprType {
 	case symbolic.IntType:
-		return zt.ctx.IntConst(name)
+		return zt.ctx.Const(name, zt.bvSort)
 	case symbolic.BoolType:
 		return zt.ctx.BoolConst(name)
 	case symbolic.StringType:
 		return zt.ctx.Const(name, zt.stringSort)
 	case symbolic.ArrayType:
-		arrSort := zt.ctx.ArraySort(zt.ctx.IntSort(), zt.ctx.IntSort())
+		arrSort := zt.ctx.ArraySort(zt.bvSort, zt.bvSort)
 		return zt.ctx.Const(name, arrSort)
 	default:
 		panic("Not impl.")
