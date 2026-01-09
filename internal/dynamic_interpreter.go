@@ -158,22 +158,41 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		}
 
 	// X Op Y
-	// TODO IMPL оставшихся?
 	/*
-	 / One of:
-	 / ADD SUB MUL QUO REM          + - * / %
-	 / AND OR XOR SHL SHR AND_NOT   & | ^ << >> &^
-	 / EQL NEQ LSS LEQ GTR GEQ      == != < <= < >=
+		One of:
+		ADD SUB MUL QUO REM          + - * / %
+		AND OR XOR SHL SHR AND_NOT   & | ^ << >> &^
+		EQL NEQ LSS LEQ GTR GEQ      == != < <= < >=
 	*/
 	case *ssa.BinOp:
 		l := interpreter.resolveExpression(v.X)
 		r := interpreter.resolveExpression(v.Y)
 
-		sop, ok := binOpToSym(v.Op)
-		if !ok {
+		/*
+			Implemented:
+			ADD SUB MUL QUO REM          + - * / %
+			XOR SHL SHR   			     ^ << >>
+			EQL NEQ LSS LEQ GTR GEQ      == != < <= < >=
+		*/
+		if sop, ok := tokenToBinOp(v.Op); ok {
+			return symbolic.NewBinaryOperation(l, r, sop)
+		}
+
+		/*
+			Implemented:
+			AND OR AND_NOT   & | &^
+		*/
+		switch v.Op {
+		case token.AND:
+			return symbolic.NewLogicalOperation([]symbolic.SymbolicExpression{l, r}, symbolic.AND)
+		case token.OR:
+			return symbolic.NewLogicalOperation([]symbolic.SymbolicExpression{l, r}, symbolic.OR)
+		case token.AND_NOT:
+			andExpr := symbolic.NewLogicalOperation([]symbolic.SymbolicExpression{l, r}, symbolic.AND)
+			return symbolic.NewLogicalOperation([]symbolic.SymbolicExpression{andExpr}, symbolic.NOT)
+		default:
 			return symbolic.NewSymbolicVariable(v.Name(), goTypeToSym(v.Type()))
 		}
-		return symbolic.NewBinaryOperation(l, r, sop)
 
 	// Op X
 	// One of: NOT SUB ARROW MUL XOR ! - <- * ^
@@ -187,23 +206,19 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 			// Унарный минус (0 - X)
 			zero := symbolic.NewIntConstant(0)
 			return symbolic.NewBinaryOperation(zero, operand, symbolic.SUB)
+		case token.ARROW:
+			panic("Implement me")
+		case token.MUL:
+			panic("Implement me")
+		case token.XOR:
+			panic("Implement me")
 		default:
 			return symbolic.NewSymbolicVariable(v.Name(), goTypeToSym(v.Type()))
 		}
 
 	// The Call instruction represents a function or method call.
 	case *ssa.Call:
-		// функция + аргументы
-		// args := make([]symbolic.SymbolicExpression, 0, len(x.Call.Args))
-		// for _, a := range x.Call.Args {
-		// args = append(args, valueToSym(a))
-		// }
-		// name := "call"
-		// if x.Call.StaticCallee() != nil {
-		// name = x.Call.StaticCallee().Name()
-		// }
-		// return symbolic.NewFunctionCall(name, args, goTypeToSym(x.Type()))
-		panic("Support me!")
+		panic("Implement me HW5!")
 
 	default:
 		// fallback: просто символ по имени SSA value
@@ -211,7 +226,7 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	}
 }
 
-func binOpToSym(op token.Token) (symbolic.BinaryOperator, bool) {
+func tokenToBinOp(op token.Token) (symbolic.BinaryOperator, bool) {
 	switch op {
 	case token.ADD:
 		return symbolic.ADD, true
@@ -223,6 +238,13 @@ func binOpToSym(op token.Token) (symbolic.BinaryOperator, bool) {
 		return symbolic.DIV, true
 	case token.REM:
 		return symbolic.MOD, true
+
+	case token.XOR:
+		panic("Implement me")
+	case token.SHL:
+		panic("Implement me")
+	case token.SHR:
+		panic("Implement me")
 
 	case token.EQL:
 		return symbolic.EQ, true
