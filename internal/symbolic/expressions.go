@@ -460,7 +460,7 @@ type Ref struct {
 
 func NewRef(idx int64, refType ExpressionType) *Ref {
 	return &Ref{
-		Idx:     NewSymbolicVariable(fmt.Sprint(idx), IntType),
+		Idx:     NewSymbolicVariable(fmt.Sprintf("addr_%d", idx), IntType),
 		OwnType: RefType,
 		RefType: refType,
 	}
