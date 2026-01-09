@@ -192,7 +192,8 @@ func (zt *Z3Translator) VisitBinaryOperation(expr *symbolic.BinaryOperation) int
 		case symbolic.SHR:
 			return leftZ3i.SRsh(rightZ3i)
 		case symbolic.AND_NOT:
-			return leftZ3i.And(rightZ3i).Not()
+			// x &^ y в Go = x & (^y)
+			return leftZ3i.And(rightZ3i.Not())
 
 		// Операторы сравнения
 		case symbolic.EQ:
