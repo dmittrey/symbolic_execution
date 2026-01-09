@@ -109,33 +109,45 @@ func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *Bina
 	lt, rt := left.Type(), right.Type()
 
 	switch {
-	case lt == IntType && rt == IntType:
+	case lt == IntType && rt == IntType && (op != IMPLIES):
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 
-	case lt == BoolType && rt == BoolType && (op == EQ || op == NE):
+	case lt == BoolType && rt == BoolType &&
+		(op == EQ || op == NE || op == AND || op == OR || op == XOR || op == AND_NOT || op == IMPLIES):
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 
-	case lt == StringType && rt == StringType && (op == EQ || op == NE):
+	case lt == StringType && rt == StringType &&
+		(op == EQ || op == NE):
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 
-	case lt == ArrayType && rt == ArrayType && (op == EQ || op == NE):
+	case lt == ArrayType && rt == ArrayType &&
+		(op == EQ || op == NE):
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 
-	case lt == RefType && rt == RefType && (op == EQ || op == NE):
-		return &BinaryOperation{Left: left.(*Ref).Idx, Right: right.(*Ref).Idx, Operator: op}
+	// case lt == RefType && rt == RefType &&
+	// (op == EQ || op == NE):
+	// return &BinaryOperation{Left: left.(*Ref).Idx, Right: right.(*Ref).Idx, Operator: op}
 
 	default:
-		return &BinaryOperation{Left: left, Right: right, Operator: op}
-		// panic(fmt.Errorf("binary op %v not supported for %s(%v) and %s(%v)", op, left, lt, right, rt))
+		// return &BinaryOperation{Left: left, Right: right, Operator: op}
+		panic(fmt.Errorf("binary op %v not supported for %s(%v) and %s(%v)", op, left, lt, right, rt))
 	}
 }
 
 func (bo *BinaryOperation) Type() ExpressionType {
 	switch bo.Operator {
-	case EQ, NE, LT, LE, GT, GE:
-		return BoolType
-	case ADD, SUB, MUL, DIV, MOD:
+	case ADD, SUB, MUL, DIV, REM, XOR, SHL, SHR:
 		return IntType
+	case AND, OR, AND_NOT:
+		if bo.Left.Type() == IntType {
+			// Bitvec ops
+			return IntType
+		} else {
+			// Bool ops
+			return BoolType
+		}
+	case EQ, NE, LT, LE, GT, GE, IMPLIES:
+		return BoolType
 	default:
 		panic("unknown operator")
 	}
@@ -153,68 +165,6 @@ func (bo *BinaryOperation) String() string {
 // Accept реализует Visitor pattern
 func (bo *BinaryOperation) Accept(visitor Visitor) interface{} {
 	return visitor.VisitBinaryOperation(bo)
-}
-
-// LogicalOperation представляет логическую операцию
-type LogicalOperation struct {
-	Operands []SymbolicExpression
-	Operator LogicalOperator
-}
-
-func NewLogicalOperation(operands []SymbolicExpression, op LogicalOperator) *LogicalOperation {
-	for _, o := range operands {
-		if o.Type() != BoolType && o.Type() != RefType {
-			panic(fmt.Sprintf("logical operation expects bool operands %s %s", o.Type().String(), o.String()))
-		}
-	}
-	switch op {
-	case NOT:
-		if len(operands) != 1 {
-			panic("NOT expects 1 operand")
-		}
-	case IMPLIES:
-		if len(operands) != 2 {
-			panic("IMPLIES expects 2 operands")
-		}
-	case AND, OR:
-		if len(operands) < 2 {
-			panic("AND/OR expect at least 2 operands")
-		}
-	default:
-		panic("unknown logical operator")
-	}
-	return &LogicalOperation{Operands: operands, Operator: op}
-}
-
-// Type возвращает тип логической операции (всегда bool)
-func (lo *LogicalOperation) Type() ExpressionType {
-	return BoolType
-}
-
-// String возвращает строковое представление логической операции
-func (lo *LogicalOperation) String() string {
-	switch lo.Operator {
-	case NOT:
-		return fmt.Sprintf("!%s", lo.Operands[0].String())
-	case IMPLIES:
-		return fmt.Sprintf("(%s => %s)", lo.Operands[0].String(), lo.Operands[1].String())
-	default:
-		if len(lo.Operands) < 2 {
-			panic("AND/OR expect at least 2 operand")
-		}
-
-		parts := make([]string, len(lo.Operands))
-		for i, op := range lo.Operands {
-			parts[i] = op.String()
-		}
-		sep := " " + lo.Operator.String() + " " // " && " или " || "
-		return "(" + strings.Join(parts, sep) + ")"
-	}
-}
-
-// Accept реализует Visitor pattern
-func (lo *LogicalOperation) Accept(visitor Visitor) interface{} {
-	return visitor.VisitLogicalOperation(lo)
 }
 
 // - FunctionCall (вызовы функций: f(x, y))
@@ -381,7 +331,16 @@ const (
 	SUB
 	MUL
 	DIV
-	MOD
+	REM
+
+	// Логические операторы
+	AND     // &
+	OR      // |
+	XOR     // ^
+	SHL     // <<
+	SHR     // >>
+	AND_NOT // &^
+	IMPLIES // ->
 
 	// Операторы сравнения
 	EQ // равно
@@ -403,8 +362,22 @@ func (op BinaryOperator) String() string {
 		return "*"
 	case DIV:
 		return "/"
-	case MOD:
+	case REM:
 		return "%"
+	case AND:
+		return "&"
+	case OR:
+		return "|"
+	case XOR:
+		return "^"
+	case SHL:
+		return "<<"
+	case SHR:
+		return ">>"
+	case AND_NOT:
+		return "&^"
+	case IMPLIES:
+		return "=>"
 	case EQ:
 		return "=="
 	case NE:
@@ -417,32 +390,6 @@ func (op BinaryOperator) String() string {
 		return ">"
 	case GE:
 		return ">="
-	default:
-		return "unknown"
-	}
-}
-
-// Логические операторы
-type LogicalOperator int
-
-const (
-	AND LogicalOperator = iota
-	OR
-	NOT
-	IMPLIES
-)
-
-// String возвращает строковое представление логического оператора
-func (op LogicalOperator) String() string {
-	switch op {
-	case AND:
-		return "&&"
-	case OR:
-		return "||"
-	case NOT:
-		return "!"
-	case IMPLIES:
-		return "=>"
 	default:
 		return "unknown"
 	}

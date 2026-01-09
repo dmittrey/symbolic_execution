@@ -6,7 +6,6 @@ type Visitor interface {
 	VisitIntConstant(expr *IntConstant) interface{}
 	VisitBoolConstant(expr *BoolConstant) interface{}
 	VisitBinaryOperation(expr *BinaryOperation) interface{}
-	VisitLogicalOperation(expr *LogicalOperation) interface{}
 	VisitFunctionCall(expr *FunctionCall) interface{}
 	VisitConditionalExpression(expr *ConditionalExpression) interface{}
 	VisitArray(expr *Array) interface{}

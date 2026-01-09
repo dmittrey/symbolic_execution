@@ -79,20 +79,23 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 		// then -> Succs[0]
 		if len(i.Block().Succs) >= 1 {
 			thenState := *interpreter // копия
-			thenState.PathCondition = symbolic.NewLogicalOperation(
-				[]symbolic.SymbolicExpression{thenState.PathCondition, cond},
+			thenState.PathCondition = symbolic.NewBinaryOperation(
+				thenState.PathCondition,
+				cond,
 				symbolic.AND,
 			)
 			out = append(out, &Item{value: thenState, block: block.Succs[0], instrIdx: 0, pred: block})
 		}
 		if len(i.Block().Succs) >= 2 {
 			elseState := *interpreter // копия
-			notCond := symbolic.NewLogicalOperation(
-				[]symbolic.SymbolicExpression{cond},
-				symbolic.NOT,
+			notCond := symbolic.NewBinaryOperation(
+				cond,
+				symbolic.NewBoolConstant(true), //TODO Add unary
+				symbolic.AND_NOT,
 			)
-			elseState.PathCondition = symbolic.NewLogicalOperation(
-				[]symbolic.SymbolicExpression{elseState.PathCondition, notCond},
+			elseState.PathCondition = symbolic.NewBinaryOperation(
+				elseState.PathCondition,
+				notCond,
 				symbolic.AND,
 			)
 			out = append(out, &Item{value: elseState, block: block.Succs[1], instrIdx: 0, pred: block})
@@ -184,12 +187,12 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		*/
 		switch v.Op {
 		case token.AND:
-			return symbolic.NewLogicalOperation([]symbolic.SymbolicExpression{l, r}, symbolic.AND)
+			return symbolic.NewBinaryOperation(l, r, symbolic.AND)
 		case token.OR:
-			return symbolic.NewLogicalOperation([]symbolic.SymbolicExpression{l, r}, symbolic.OR)
+			return symbolic.NewBinaryOperation(l, r, symbolic.OR)
 		case token.AND_NOT:
-			andExpr := symbolic.NewLogicalOperation([]symbolic.SymbolicExpression{l, r}, symbolic.AND)
-			return symbolic.NewLogicalOperation([]symbolic.SymbolicExpression{andExpr}, symbolic.NOT)
+			andExpr := symbolic.NewBinaryOperation(l, r, symbolic.AND)
+			return symbolic.NewBinaryOperation(andExpr, symbolic.NewIntConstant(-1), symbolic.AND_NOT)
 		default:
 			return symbolic.NewSymbolicVariable(v.Name(), goTypeToSym(v.Type()))
 		}
@@ -201,7 +204,7 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 
 		switch v.Op {
 		case token.NOT:
-			return symbolic.NewLogicalOperation([]symbolic.SymbolicExpression{operand}, symbolic.NOT)
+			return symbolic.NewBinaryOperation(operand, symbolic.NewIntConstant(-1), symbolic.AND_NOT)
 		case token.SUB:
 			// Унарный минус (0 - X)
 			zero := symbolic.NewIntConstant(0)
@@ -211,7 +214,7 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		case token.MUL:
 			panic("Implement me")
 		case token.XOR:
-			panic("Implement me")
+			return symbolic.NewBinaryOperation(operand, symbolic.NewIntConstant(-1), symbolic.XOR)
 		default:
 			return symbolic.NewSymbolicVariable(v.Name(), goTypeToSym(v.Type()))
 		}
@@ -237,7 +240,7 @@ func tokenToBinOp(op token.Token) (symbolic.BinaryOperator, bool) {
 	case token.QUO:
 		return symbolic.DIV, true
 	case token.REM:
-		return symbolic.MOD, true
+		return symbolic.REM, true
 
 	case token.XOR:
 		panic("Implement me")

@@ -24,7 +24,6 @@ type ExpressionTranslator interface {
 	VisitIntConstant(expr *symbolic.IntConstant) (interface{}, error)
 	VisitBoolConstant(expr *symbolic.BoolConstant) (interface{}, error)
 	VisitBinaryOperation(expr *symbolic.BinaryOperation) (interface{}, error)
-	VisitLogicalOperation(expr *symbolic.LogicalOperation) (interface{}, error)
 	VisitFunctionCall(expr *symbolic.FunctionCall) (interface{}, error)
 	VisitConditionalExpression(expr *symbolic.ConditionalExpression) (interface{}, error)
 	VisitArray(expr *symbolic.Array) (interface{}, error)
