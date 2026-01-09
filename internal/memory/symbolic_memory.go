@@ -42,8 +42,9 @@ type SymbolicMemory struct {
 	Allocations    []*symbolic.Ref
 
 	// Primitives
-	IntSegment  *symbolic.Array
-	BoolSegment *symbolic.Array
+	IntSegment    *symbolic.Array
+	BoolSegment   *symbolic.Array
+	StringSegment *symbolic.Array
 
 	// Structures
 	LastTypeIdx  int
@@ -63,8 +64,9 @@ func NewSymbolicMemory() *SymbolicMemory {
 		Params:         make([]*symbolic.Ref, 0),
 		Allocations:    make([]*symbolic.Ref, 0),
 
-		IntSegment:  symbolic.NewArray("IntSegment", symbolic.IntType),
-		BoolSegment: symbolic.NewArray("BoolSegment", symbolic.BoolType),
+		IntSegment:    symbolic.NewArray("IntSegment", symbolic.IntType),
+		BoolSegment:   symbolic.NewArray("BoolSegment", symbolic.BoolType),
+		StringSegment: symbolic.NewArray("StringSegment", symbolic.StringType),
 
 		RefToTypeIdx: make(map[*symbolic.SymbolicVariable]int),
 		TypeToInt:    make(map[string]int),
@@ -94,7 +96,7 @@ func (mem *SymbolicMemory) ParamRef(name string, tpe symbolic.ExpressionType) *s
 	}
 
 	switch tpe {
-	case symbolic.IntType, symbolic.BoolType:
+	case symbolic.IntType, symbolic.BoolType, symbolic.StringType:
 		r := symbolic.NewRef(mem.nextId(), tpe)
 		mem.Params = append(mem.Params, r)
 		mem.ParamNameToRef[name] = r
@@ -167,6 +169,9 @@ func (mem *SymbolicMemory) AssignValue(ref *symbolic.Ref, value symbolic.Symboli
 	case symbolic.BoolType:
 		mem.BoolSegment = symbolic.NewArrayStore(mem.BoolSegment, ref.Idx, value)
 
+	case symbolic.StringType:
+		mem.StringSegment = symbolic.NewArrayStore(mem.StringSegment, ref.Idx, value)
+
 	default:
 		panic(fmt.Sprintf("AssignValue: Unsupported operation for type %d", ref.RefType))
 	}
@@ -179,6 +184,9 @@ func (mem *SymbolicMemory) GetValue(ref *symbolic.Ref) symbolic.SymbolicExpressi
 
 	case symbolic.BoolType:
 		return symbolic.NewArrayAccess(mem.BoolSegment, ref.Idx)
+
+	case symbolic.StringType:
+		return symbolic.NewArrayAccess(mem.StringSegment, ref.Idx)
 
 	default:
 		panic("AssignValue: Unsupported operation for type")

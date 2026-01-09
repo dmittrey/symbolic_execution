@@ -274,8 +274,9 @@ func tokenToUnOp(op token.Token) (symbolic.UnaryOperator, bool) {
 
 func goTypeToSym(t types.Type) symbolic.ExpressionType {
 	if t == nil {
-		return symbolic.IntType // fallback
+		panic("nil")
 	}
+
 	switch tt := t.Underlying().(type) {
 	case *types.Basic:
 		switch {
@@ -286,9 +287,13 @@ func goTypeToSym(t types.Type) symbolic.ExpressionType {
 		case tt.Info()&types.IsString != 0:
 			return symbolic.StringType
 		}
+	case *types.Pointer:
+		return goTypeToSym(tt.Elem())
+	default:
+		panic(fmt.Sprintf("Not impl: %T\n", tt))
 	}
-	// упрощение: всё неизвестное как Int
-	return symbolic.IntType
+
+	panic(fmt.Sprintf("Not impl: %T\n", t))
 }
 
 func nextInSameBlock(st Interpreter, block *ssa.BasicBlock, instrIdx int, pred *ssa.BasicBlock) []*Item {
