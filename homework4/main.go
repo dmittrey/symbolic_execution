@@ -11,234 +11,95 @@ import (
 
 func main() {
 	source := `
-package main
+package final_tests
 
-func test1(x int) int {
-	if x > 10 {
-		return x + 1
-	} else {
-		return x - 1
-	}
+type Foo struct {
+	a int
 }
 
-func test2(a, b bool) bool {
-	if a && b {
-		return true
+func IntAliasing(foo1 int, foo2 int) int {
+	if foo2 == foo1 {
+		return 4
 	}
-	return false
+	return 5
 }
 
-func testArithmetic(x, y int) int {
-	result := (x + y) * (x - y)
-
-	if result < 0 {
-		result = -result
+func BoolAliasing(foo1 bool, foo2 bool) int {
+	if foo2 == foo1 {
+		return 4
 	}
-
-	return result % 10
+	return 5
 }
 
-func testUnary(x int) int {
-	y := -x
-	z := ^y
-
-	if z > 0 {
-		return z
+func StringAliasing(foo1 string, foo2 string) int {
+	if foo2 == foo1 {
+		return 4
 	}
-	return y
+	return 5
 }
 
-func testComparisons(a, b int) bool {
-	if a == b {
-		return true
-	}
+func IntRefAliasing(foo1 *int, foo2 *int) int {
+	*foo2 = 5
 
-	if a != b && a > 0 {
-		return b < 0
-	}
+	*foo1 = 2
 
-	return a >= b || a <= -b
+	if *foo2 == 2 {
+		return 4
+	}
+	return 5
 }
 
-func testLogicalOps(x, y int) bool {
-	cond1 := x > 0 && y > 0
-	cond2 := x < 0 || y < 0
+func BoolRefAliasing(foo1 *bool, foo2 *bool) int {
+	*foo2 = true
 
-	return cond1 != cond2
+	*foo1 = false
+
+	if *foo2 == false {
+		return 4
+	}
+	return 5
 }
 
-func testWhileLoop(n int) int {
-	i := 0
-	sum := 0
+func StringRefAliasing(foo1 *string, foo2 *string) int {
+	*foo2 = "hi"
 
-	for i < n {
-		sum += i
-		i++
+	*foo1 = "kek"
+
+	if *foo2 == "kek" {
+		return 4
 	}
-	return sum
+	return 5
 }
 
-func testForLoop(n int) int {
-	result := 1
-	for i := 1; i <= n; i++ {
-		if i%2 == 0 {
-			result *= i
-		} else {
-			result += i
-		}
+func StructAliasing(foo1 *Foo, foo2 *Foo) int {
+	foo2.a = 5
+	foo1.a = 2
+	if foo2.a == 2 {
+		return 4
 	}
-	return result
+	return 5
 }
 
-func testInfiniteLoopBreak(x int) int {
-	i := 0
-	for {
-		if i >= x {
-			break
-		}
-		i++
+func ArrayAliasing(arr1 []int, arr2 []int) int {
+	arr2[1] = 5
+	arr1[1] = 2
+	if arr2[1] == 2 {
+		return 4
 	}
-	return i
+	return 5
 }
 
-func testLoopWithConcreteBoundAndSymbolicBranching(condition bool) int {
-	result := 0
-	for i := 0; i < 10; i++ {
-		if condition && i%2 == 0 {
-			result += i
-		}
-	}
-	return result
-}
-
-func testLoopWithSymbolicBoundAndSymbolicBranching(n int, condition bool) int {
-	if n > 10 {
-		panic("Assumption violated: n should be less than or equal to 10")
-	}
-
-	result := 0
-	for i := 0; i < n; i++ {
-		if condition && i%2 == 0 {
-			result += i
-		}
-	}
-	return result
-}
-
-func testComplexConditions(a, b, c int) int {
-	if (a > b && b < c) || (a < b && b > c) {
-		return 1
-	} else if a == b && b == c {
-		return 2
-	} else {
-		return 3
-	}
-}
-
-func testNestedIf(x, y int) int {
-	if x > 0 {
-		if y > 0 {
-			return 1
-		} else {
-			return 2
-		}
-	} else {
-		if y > 0 {
-			return 3
-		} else {
-			return 4
-		}
-	}
-}
-
-func testBitwise(a, b int) int {
-	and := a & b
-	or := a | b
-	xor := a ^ b
-
-	if (and | or) > 0 {
-		return xor << 1
-	}
-	return xor >> 1
-}
-
-func testCombined(x int) int {
-	y := x * 2
-	z := 0
-
-	for i := 0; i < y; i++ {
-		if i%3 == 0 {
-			z += i
-		} else if i%3 == 1 {
-			z -= i
-		} else {
-			z *= 2
-		}
-
-		if z > 100 {
-			break
-		}
-	}
-
-	if z < 0 {
-		return -z
-	}
-	return z
-}
-
-func testEdgeCases(a int) int {
-	if a == 0 {
-		return 0
-	}
-
-	if a < 0 {
-		return -1
-	}
-
-	return 1
-}
-
-func testMultipleReturns(x int) int {
-	if x < 0 {
-		return -x
-	}
-
-	if x == 0 {
-		return 0
-	}
-
-	return x * 2
-}
-
-func testSimpleSum(a, b float64) float64 {
-	c := a + 1.1
-	if b+c > 10.1 && b+c < 11.125 {
-		return 1.1
-	} else {
-		return 1.2
-	}
-}
 `
 
 	funcs := []string{
-		// "test1",
-		// "test2",
-		// "testArithmetic",
-		"testUnary",
-		// "testComparisons",
-		// "testLogicalOps",
-		// "testWhileLoop",
-		// "testForLoop",
-		// "testInfiniteLoopBreak",
-		// "testLoopWithConcreteBoundAndSymbolicBranching",
-		// "testLoopWithSymbolicBoundAndSymbolicBranching",
-		// "testComplexConditions",
-		// "testNestedIf",
-		// "testBitwise",
-		// "testCombined",
-		// "testEdgeCases",
-		// "testMultipleReturns",
-		// "testSimpleSum",
+		"IntAliasing",
+		"BoolAliasing",
+		"StringAliasing",
+		"IntRefAliasing",
+		"BoolRefAliasing",
+		"StringRefAliasing",
+		"StructAliasing",
+		"ArrayAliasing",
 	}
 
 	analyser := internal.NewAnalyser()
