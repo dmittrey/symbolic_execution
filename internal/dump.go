@@ -3,6 +3,7 @@ package internal
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"symbolic-execution-course/internal/memory"
@@ -106,9 +107,66 @@ func (st Interpreter) Dump() string {
 			}
 		}
 
-		// Structures (если начнёшь их использовать)
-		if len(mem.TypeToInt) > 0 || len(mem.RefToTypeIdx) > 0 {
-			fmt.Fprintf(&b, "    StructTypes: %d, RefToTypeIdx: %d\n", len(mem.TypeToInt), len(mem.RefToTypeIdx))
+		// ----- StructTypes / RefToTypeIdx detailed dump -----
+		if len(mem.TypeToInt) > 0 {
+			// typeIdx -> name (для расшифровки RefToTypeIdx)
+			idxToName := make(map[int]string, len(mem.TypeToInt))
+
+			names := make([]string, 0, len(mem.TypeToInt))
+			for name := range mem.TypeToInt {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+
+			fmt.Fprintf(&b, "    StructTypes: %d\n", len(names))
+			for _, name := range names {
+				idx := mem.TypeToInt[name]
+				idxToName[idx] = name
+				fmt.Fprintf(&b, "      T[%d]: %s\n", idx, name)
+			}
+
+			// RefToTypeIdx: map[*SymbolicVariable]int (addr_0 -> typeIdx)
+			if len(mem.RefToTypeIdx) > 0 {
+				vars := make([]*symbolic.SymbolicVariable, 0, len(mem.RefToTypeIdx))
+				for v := range mem.RefToTypeIdx {
+					vars = append(vars, v)
+				}
+
+				sort.Slice(vars, func(i, j int) bool {
+					return addrVarOrderKey(vars[i]) < addrVarOrderKey(vars[j])
+				})
+
+				fmt.Fprintf(&b, "    RefToTypeIdx: %d\n", len(vars))
+				for _, v := range vars {
+					typeIdx := mem.RefToTypeIdx[v]
+					typeName := idxToName[typeIdx]
+					if typeName == "" {
+						typeName = "<unknown>"
+					}
+					// печатаем как "&addr_N", чтобы было похоже на Ref.String()
+					fmt.Fprintf(&b, "      &%s -> T[%d] (%s)\n", v.Name, typeIdx, typeName)
+				}
+			} else {
+				fmt.Fprintf(&b, "    RefToTypeIdx: <empty>\n")
+			}
+		} else {
+			// на всякий случай: типы пустые, но ссылки есть
+			if len(mem.RefToTypeIdx) > 0 {
+				fmt.Fprintf(&b, "    StructTypes: <empty>\n")
+
+				vars := make([]*symbolic.SymbolicVariable, 0, len(mem.RefToTypeIdx))
+				for v := range mem.RefToTypeIdx {
+					vars = append(vars, v)
+				}
+				sort.Slice(vars, func(i, j int) bool {
+					return addrVarOrderKey(vars[i]) < addrVarOrderKey(vars[j])
+				})
+
+				fmt.Fprintf(&b, "    RefToTypeIdx: %d\n", len(vars))
+				for _, v := range vars {
+					fmt.Fprintf(&b, "      &%s -> T[%d]\n", v.Name, mem.RefToTypeIdx[v])
+				}
+			}
 		}
 
 		fmt.Fprintf(&b, "  }\n")
@@ -162,4 +220,17 @@ func safeExpr(e symbolic.SymbolicExpression) string {
 		return "<nil>"
 	}
 	return e.String()
+}
+
+func addrVarOrderKey(v *symbolic.SymbolicVariable) int {
+	if v == nil {
+		return 1 << 30
+	}
+	s := v.Name // ожидаем "addr_N"
+	s = strings.TrimPrefix(s, "addr_")
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 1 << 30
+	}
+	return n
 }
