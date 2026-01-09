@@ -284,6 +284,36 @@ func (zt *Z3Translator) VisitBinaryOperation(expr *symbolic.BinaryOperation) int
 	panic("Not impl type.")
 }
 
+// VisitUnaryOperation транслирует бинарную операцию в Z3
+func (zt *Z3Translator) VisitUnaryOperation(expr *symbolic.UnaryOperation) interface{} {
+	operandZ3, err := zt.TranslateExpression(expr.Operand)
+	if err != nil {
+		panic("VisitUnaryOperation: Unable to translate operand.")
+	}
+
+	if operandZ3i, ok := operandZ3.(z3.BV); ok {
+		switch expr.Operator {
+		case symbolic.NEG:
+			return operandZ3i.Neg()
+		case symbolic.UXOR:
+			return operandZ3i.Not()
+		default:
+			panic("Not impl.")
+		}
+	}
+
+	if operandZ3b, ok := operandZ3.(z3.Bool); ok {
+		switch expr.Operator {
+		case symbolic.NOT:
+			return operandZ3b.Not()
+		default:
+			panic("Not impl.")
+		}
+	}
+
+	panic("Not impl type.")
+}
+
 func (zt *Z3Translator) VisitFunctionCall(expr *symbolic.FunctionCall) interface{} {
 	// 1) Переводим аргументы в Z3
 	argVals := make([]z3.Value, len(expr.Args))

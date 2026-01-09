@@ -167,6 +167,41 @@ func (bo *BinaryOperation) Accept(visitor Visitor) interface{} {
 	return visitor.VisitBinaryOperation(bo)
 }
 
+type UnaryOperation struct {
+	Operand  SymbolicExpression
+	Operator UnaryOperator
+}
+
+func NewUnaryOperation(operand SymbolicExpression, operator UnaryOperator) *UnaryOperation {
+	switch {
+	case operand.Type() == IntType && (operator == UXOR || operator == NEG):
+		return &UnaryOperation{Operand: operand, Operator: operator}
+
+	case operand.Type() == BoolType && operator == NOT:
+		return &UnaryOperation{Operand: operand, Operator: operator}
+
+	default:
+		panic(fmt.Errorf("unary op %s not supported for %s(%s)", operator.String(), operand.String(), operand.Type().String()))
+	}
+}
+
+func (uo *UnaryOperation) Type() ExpressionType {
+	return uo.Operand.Type()
+}
+
+// String возвращает строковое представление операции
+func (uo *UnaryOperation) String() string {
+	return fmt.Sprintf("(%s%s)",
+		uo.Operator.String(),
+		uo.Operand.String(),
+	)
+}
+
+// Accept реализует Visitor pattern
+func (uo *UnaryOperation) Accept(visitor Visitor) interface{} {
+	return visitor.VisitUnaryOperation(uo)
+}
+
 // - FunctionCall (вызовы функций: f(x, y))
 type FunctionCall struct {
 	Name    string
@@ -391,7 +426,29 @@ func (op BinaryOperator) String() string {
 	case GE:
 		return ">="
 	default:
-		return "unknown"
+		panic("Impl me")
+	}
+}
+
+// Операторы для унарных выражений
+type UnaryOperator int
+
+const (
+	NOT UnaryOperator = iota
+	NEG
+	UXOR
+)
+
+func (op UnaryOperator) String() string {
+	switch op {
+	case NOT:
+		return "!"
+	case NEG:
+		return "-"
+	case UXOR:
+		return "^"
+	default:
+		panic("Impl me")
 	}
 }
 

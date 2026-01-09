@@ -171,53 +171,25 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		l := interpreter.resolveExpression(v.X)
 		r := interpreter.resolveExpression(v.Y)
 
-		/*
-			Implemented:
-			ADD SUB MUL QUO REM          + - * / %
-			XOR SHL SHR   			     ^ << >>
-			EQL NEQ LSS LEQ GTR GEQ      == != < <= < >=
-		*/
 		if sop, ok := tokenToBinOp(v.Op); ok {
 			return symbolic.NewBinaryOperation(l, r, sop)
 		}
 
-		/*
-			Implemented:
-			AND OR AND_NOT   & | &^
-		*/
-		switch v.Op {
-		case token.AND:
-			return symbolic.NewBinaryOperation(l, r, symbolic.AND)
-		case token.OR:
-			return symbolic.NewBinaryOperation(l, r, symbolic.OR)
-		case token.AND_NOT:
-			andExpr := symbolic.NewBinaryOperation(l, r, symbolic.AND)
-			return symbolic.NewBinaryOperation(andExpr, symbolic.NewIntConstant(-1), symbolic.AND_NOT)
-		default:
-			return symbolic.NewSymbolicVariable(v.Name(), goTypeToSym(v.Type()))
-		}
+		return symbolic.NewSymbolicVariable(v.Name(), goTypeToSym(v.Type()))
 
 	// Op X
-	// One of: NOT SUB ARROW MUL XOR ! - <- * ^
+	/*
+		One of:
+		NOT SUB ARROW MUL XOR ! - <- * ^
+	*/
 	case *ssa.UnOp:
 		operand := interpreter.resolveExpression(v.X)
 
-		switch v.Op {
-		case token.NOT:
-			return symbolic.NewBinaryOperation(operand, symbolic.NewIntConstant(-1), symbolic.AND_NOT)
-		case token.SUB:
-			// Унарный минус (0 - X)
-			zero := symbolic.NewIntConstant(0)
-			return symbolic.NewBinaryOperation(zero, operand, symbolic.SUB)
-		case token.ARROW:
-			panic("Implement me")
-		case token.MUL:
-			panic("Implement me")
-		case token.XOR:
-			return symbolic.NewBinaryOperation(operand, symbolic.NewIntConstant(-1), symbolic.XOR)
-		default:
-			return symbolic.NewSymbolicVariable(v.Name(), goTypeToSym(v.Type()))
+		if sop, ok := tokenToUnOp(v.Op); ok {
+			return symbolic.NewUnaryOperation(operand, sop)
 		}
+
+		return symbolic.NewSymbolicVariable(v.Name(), goTypeToSym(v.Type()))
 
 	// The Call instruction represents a function or method call.
 	case *ssa.Call:
@@ -242,12 +214,18 @@ func tokenToBinOp(op token.Token) (symbolic.BinaryOperator, bool) {
 	case token.REM:
 		return symbolic.REM, true
 
+	case token.AND:
+		return symbolic.AND, true
+	case token.OR:
+		return symbolic.OR, true
 	case token.XOR:
-		panic("Implement me")
+		return symbolic.XOR, true
 	case token.SHL:
-		panic("Implement me")
+		return symbolic.SHL, true
 	case token.SHR:
-		panic("Implement me")
+		return symbolic.SHR, true
+	case token.AND_NOT:
+		return symbolic.AND_NOT, true
 
 	case token.EQL:
 		return symbolic.EQ, true
@@ -262,7 +240,20 @@ func tokenToBinOp(op token.Token) (symbolic.BinaryOperator, bool) {
 	case token.GEQ:
 		return symbolic.GE, true
 	default:
-		return 0, false
+		panic("Not impl!")
+	}
+}
+
+func tokenToUnOp(op token.Token) (symbolic.UnaryOperator, bool) {
+	switch op {
+	case token.NOT:
+		return symbolic.NOT, true
+	case token.SUB:
+		return symbolic.NEG, true
+	case token.XOR:
+		return symbolic.UXOR, true
+	default:
+		panic("Not impl!")
 	}
 }
 
