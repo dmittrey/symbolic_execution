@@ -51,6 +51,7 @@ func (analyser *Analyser) Analyse(source string, functionName string) []Interpre
 		block:    fn.Blocks[0],
 		instrIdx: 0,
 		priority: selector.CalculatePriority(startState),
+		pred:     nil,
 	})
 
 	results := make([]Interpreter, 0)
