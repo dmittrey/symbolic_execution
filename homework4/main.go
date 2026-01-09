@@ -256,11 +256,12 @@ func testSimpleSum(a, b float64) float64 {
 			fmt.Println(st.Dump())
 
 			tr.AssertExpr(st.PathCondition)
+			for _, c := range st.Heap.Constraints() {
+				tr.AssertExpr(c)
+			}
 
 			if m := mustSat(tr); m != nil {
 				fmt.Printf("Model:\n%s\n", m.String())
-			} else {
-				panic("")
 			}
 		}
 	}

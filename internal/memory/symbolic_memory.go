@@ -31,6 +31,8 @@ type Memory interface {
 	AssignToArray(ref *symbolic.Ref, index int, value symbolic.SymbolicExpression)
 
 	GetFromArray(ref *symbolic.Ref, index int) symbolic.SymbolicExpression
+
+	Constraints() []symbolic.SymbolicExpression
 }
 
 type SymbolicMemory struct {
