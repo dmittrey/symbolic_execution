@@ -15,6 +15,7 @@ type Interpreter struct {
 	CallStack     []CallStackFrame
 	Analyser      *Analyser
 	PathCondition symbolic.SymbolicExpression
+	ReturnResults []symbolic.SymbolicExpression
 	Heap          memory.Memory
 	Env           map[ssa.Value]symbolic.SymbolicExpression
 }
@@ -49,8 +50,16 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 
 	switch i := instr.(type) {
 	case *ssa.Return:
+		interpreter.ReturnResults = make([]symbolic.SymbolicExpression, len(i.Results))
+		for idx, val := range i.Results {
+			interpreter.ReturnResults[idx] = interpreter.resolveExpression(val)
+		}
+
 		return []*Item{{value: *interpreter, block: nil, instrIdx: -1}}
 	case *ssa.Panic:
+		// No results on panic
+		interpreter.ReturnResults = make([]symbolic.SymbolicExpression, 0)
+
 		return []*Item{{value: *interpreter, block: nil, instrIdx: -1}}
 	case *ssa.Select:
 		panic("Support me!")

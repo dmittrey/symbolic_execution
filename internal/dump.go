@@ -14,6 +14,10 @@ func (st Interpreter) Dump() string {
 
 	fmt.Fprintf(&b, "Interpreter{\n")
 	fmt.Fprintf(&b, "  PC: %s\n", safeExpr(st.PathCondition))
+	fmt.Fprintf(&b, "  ReturnResults:\n")
+	for idx, val := range st.ReturnResults {
+		fmt.Fprintf(&b, "    [%d] %s\n", idx, val.String())
+	}
 	fmt.Fprintf(&b, "  CallStack: %d frame(s)\n", len(st.CallStack))
 
 	for i, fr := range st.CallStack {
