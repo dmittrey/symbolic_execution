@@ -65,11 +65,27 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 	case *ssa.Select:
 		panic("Support me!")
 	case *ssa.Store:
-		interpreter.resolveExpression(i.Addr)
 		val := interpreter.resolveExpression(i.Val)
 
-		ref := interpreter.Heap.LookupRef(i.Addr.Name())
-		interpreter.Heap.AssignValue(ref, val)
+		switch a := i.Addr.(type) {
+		case *ssa.FieldAddr:
+			// *(&foo2.a) = val  => foo2.a = val
+			base := interpreter.resolveExpression(a.X)
+			br, ok := base.(*symbolic.Ref)
+			if !ok {
+				panic(fmt.Sprintf("Store: FieldAddr base is %T, want *symbolic.Ref", base))
+			}
+			interpreter.Heap.AssignField(br, a.Field, val)
+
+		default:
+			// обычная запись по адресу
+			addrExpr := interpreter.resolveExpression(i.Addr)
+			r, ok := addrExpr.(*symbolic.Ref)
+			if !ok {
+				panic(fmt.Sprintf("Store: Addr is %T, want *symbolic.Ref", addrExpr))
+			}
+			interpreter.Heap.AssignValue(r, val)
+		}
 
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 	case *ssa.Jump:
@@ -116,7 +132,7 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 
 	// Instructions that also implement Value interface will resolve later
-	case *ssa.BinOp, *ssa.UnOp:
+	case *ssa.BinOp, *ssa.UnOp, *ssa.FieldAddr:
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 	default:
 		panic(fmt.Sprintf("Support %T!", i))
@@ -138,8 +154,13 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	switch v := value.(type) {
 	// A Parameter represents an input parameter of a function.
 	case *ssa.Parameter:
-		// TODO Надо определить стратегию как все таки преобразовывать Ref
-		ref := interpreter.Heap.ParamRef(v.Name(), goTypeToSym(v.Type()))
+		if typeName, fields, ok := structMeta(v.Type()); ok {
+			ref := interpreter.Heap.ParamStructRef(v.Name(), typeName, fields)
+			return ref
+		}
+
+		ty := goTypeToSym(v.Type())
+		ref := interpreter.Heap.ParamRef(v.Name(), ty)
 		return interpreter.Heap.GetValue(ref)
 
 	// IntConstant, BoolConstant, StringConstant
@@ -189,16 +210,29 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		NOT SUB ARROW MUL XOR ! - <- * ^
 	*/
 	case *ssa.UnOp:
-		operand := interpreter.resolveExpression(v.X)
-
-		// WARNING: Из-за того что был применен грязный хак при резолве параметра, то мы уже
-		// отдаем take из кучи по параметру, из-за этого нет возможности отдать сырой указатель при резолве,
-		// но в данном кейсе можно просто отдать операнд
-		//
-		// TODO По уму бы отдавать сырой указатель и тут брать из кучи
+		// 1) СНАЧАЛА special-case для load: *X
 		if v.Op == token.MUL {
-			return operand
+			// вариант 1: X это &foo2.a (т.е. FieldAddr value)
+			if fa, ok := v.X.(*ssa.FieldAddr); ok {
+				base := interpreter.resolveExpression(fa.X) // fa.X = foo2
+				br, ok := base.(*symbolic.Ref)
+				if !ok {
+					panic(fmt.Sprintf("Load: FieldAddr base is %T, want *symbolic.Ref", base))
+				}
+				return interpreter.Heap.GetFieldValue(br, fa.Field)
+			}
+
+			// вариант 2: X это обычный ref (если потом появится)
+			addrExpr := interpreter.resolveExpression(v.X)
+			r, ok := addrExpr.(*symbolic.Ref)
+			if !ok {
+				panic(fmt.Sprintf("Load: %T is not *symbolic.Ref", addrExpr))
+			}
+			return interpreter.Heap.GetValue(r)
 		}
+
+		// 2) ТОЛЬКО ПОТОМ резолвим операнд для остальных унарных операций
+		operand := interpreter.resolveExpression(v.X)
 
 		if sop, ok := tokenToUnOp(v.Op); ok {
 			return symbolic.NewUnaryOperation(operand, sop)
@@ -212,7 +246,7 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 
 	default:
 		// fallback: просто символ по имени SSA value
-		panic("Support me!")
+		panic(fmt.Sprintf("Support me! %T", v))
 	}
 }
 
@@ -289,6 +323,8 @@ func goTypeToSym(t types.Type) symbolic.ExpressionType {
 		}
 	case *types.Pointer:
 		return goTypeToSym(tt.Elem())
+	case *types.Struct:
+		return symbolic.StructType
 	default:
 		panic(fmt.Sprintf("Not impl: %T\n", tt))
 	}
@@ -321,4 +357,37 @@ func pickPhiEdge(phi *ssa.Phi, block *ssa.BasicBlock, pred *ssa.BasicBlock) (ssa
 		}
 	}
 	return nil, false
+}
+
+func structMeta(t types.Type) (typeName string, fieldTypes []symbolic.ExpressionType, ok bool) {
+	for {
+		if p, isPtr := t.(*types.Pointer); isPtr {
+			t = p.Elem()
+			continue
+		}
+		break
+	}
+
+	if n, isNamed := t.(*types.Named); isNamed {
+		typeName = n.Obj().Name()
+
+		t = n.Underlying()
+	}
+
+	st, isStruct := t.(*types.Struct)
+	if !isStruct {
+		return "", nil, false
+	}
+
+	fieldTypes = make([]symbolic.ExpressionType, 0, st.NumFields())
+	for i := 0; i < st.NumFields(); i++ {
+		ft := st.Field(i).Type()
+		fieldTypes = append(fieldTypes, goTypeToSym(ft))
+	}
+
+	if typeName == "" {
+		typeName = "anon_struct"
+	}
+
+	return typeName, fieldTypes, true
 }
