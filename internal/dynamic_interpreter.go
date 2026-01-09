@@ -69,7 +69,6 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 
 		switch a := i.Addr.(type) {
 		case *ssa.FieldAddr:
-			// *(&foo2.a) = val  => foo2.a = val
 			base := interpreter.resolveExpression(a.X)
 			br, ok := base.(*symbolic.Ref)
 			if !ok {
@@ -77,8 +76,23 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 			}
 			interpreter.Heap.AssignField(br, a.Field, val)
 
+		case *ssa.IndexAddr:
+			// *(&arr[i]) = val  => arr[i] = val
+			base := interpreter.resolveExpression(a.X)
+			br, ok := base.(*symbolic.Ref)
+			if !ok {
+				panic(fmt.Sprintf("Store: IndexAddr base is %T, want *symbolic.Ref", base))
+			}
+
+			idxExpr := interpreter.resolveExpression(a.Index)
+			ic, ok := idxExpr.(*symbolic.IntConstant)
+			if !ok {
+				panic(fmt.Sprintf("Store: Index must be const int, got %T (%s)", idxExpr, idxExpr.String()))
+			}
+
+			interpreter.Heap.AssignToArray(br, int(ic.Value), val)
+
 		default:
-			// обычная запись по адресу
 			addrExpr := interpreter.resolveExpression(i.Addr)
 			r, ok := addrExpr.(*symbolic.Ref)
 			if !ok {
@@ -88,6 +102,7 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 		}
 
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
+
 	case *ssa.Jump:
 		out := make([]*Item, 0, len(block.Succs))
 		for _, s := range block.Succs {
@@ -132,7 +147,7 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 
 	// Instructions that also implement Value interface will resolve later
-	case *ssa.BinOp, *ssa.UnOp, *ssa.FieldAddr:
+	case *ssa.BinOp, *ssa.UnOp, *ssa.FieldAddr, *ssa.IndexAddr:
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 	default:
 		panic(fmt.Sprintf("Support %T!", i))
@@ -154,11 +169,24 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	switch v := value.(type) {
 	// A Parameter represents an input parameter of a function.
 	case *ssa.Parameter:
+		// struct / *struct
 		if typeName, fields, ok := structMeta(v.Type()); ok {
-			ref := interpreter.Heap.ParamStructRef(v.Name(), typeName, fields)
-			return ref
+			return interpreter.Heap.ParamStructRef(v.Name(), typeName, fields)
 		}
 
+		// []T
+		if sl, ok := v.Type().Underlying().(*types.Slice); ok {
+			elemTy := goTypeToSym(sl.Elem())
+			return interpreter.Heap.ParamArrayRef(v.Name(), elemTy)
+		}
+
+		// *T (указатель на примитив/строку)
+		if p, ok := v.Type().Underlying().(*types.Pointer); ok {
+			elemTy := goTypeToSym(p.Elem())
+			return interpreter.Heap.ParamRef(v.Name(), elemTy) // ВАЖНО: возвращаем ref, не GetValue
+		}
+
+		// обычные примитивы
 		ty := goTypeToSym(v.Type())
 		ref := interpreter.Heap.ParamRef(v.Name(), ty)
 		return interpreter.Heap.GetValue(ref)
@@ -220,6 +248,22 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 					panic(fmt.Sprintf("Load: FieldAddr base is %T, want *symbolic.Ref", base))
 				}
 				return interpreter.Heap.GetFieldValue(br, fa.Field)
+			}
+
+			if ia, ok := v.X.(*ssa.IndexAddr); ok {
+				base := interpreter.resolveExpression(ia.X)
+				br, ok := base.(*symbolic.Ref)
+				if !ok {
+					panic(fmt.Sprintf("Load: IndexAddr base is %T, want *symbolic.Ref", base))
+				}
+
+				idxExpr := interpreter.resolveExpression(ia.Index)
+				ic, ok := idxExpr.(*symbolic.IntConstant)
+				if !ok {
+					panic(fmt.Sprintf("Load: Index must be const int, got %T (%s)", idxExpr, idxExpr.String()))
+				}
+
+				return interpreter.Heap.GetFromArray(br, int(ic.Value))
 			}
 
 			// вариант 2: X это обычный ref (если потом появится)
