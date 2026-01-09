@@ -16,6 +16,7 @@ type Interpreter struct {
 	Analyser      *Analyser
 	PathCondition symbolic.SymbolicExpression
 	Heap          memory.Memory
+	Env           map[ssa.Value]symbolic.SymbolicExpression
 }
 
 func NewInterpreter(analyser *Analyser, pathCond symbolic.SymbolicExpression) Interpreter {
@@ -24,6 +25,7 @@ func NewInterpreter(analyser *Analyser, pathCond symbolic.SymbolicExpression) In
 		Analyser:      analyser,
 		PathCondition: pathCond,
 		Heap:          memory.NewSymbolicMemory(),
+		Env:           make(map[ssa.Value]symbolic.SymbolicExpression),
 	}
 }
 
@@ -33,7 +35,7 @@ type CallStackFrame struct {
 	ReturnValue symbolic.SymbolicExpression
 }
 
-func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, instrIdx int) []*Item {
+func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, instrIdx int, pred *ssa.BasicBlock) []*Item {
 	if block == nil || instrIdx < 0 || instrIdx >= len(block.Instrs) {
 		return nil
 	}
@@ -57,7 +59,7 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 	case *ssa.Jump:
 		out := make([]*Item, 0, len(block.Succs))
 		for _, s := range block.Succs {
-			out = append(out, &Item{value: *interpreter, block: s, instrIdx: 0})
+			out = append(out, &Item{value: *interpreter, block: s, instrIdx: 0, pred: block})
 		}
 		return out
 	case *ssa.If:
@@ -72,7 +74,7 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 				[]symbolic.SymbolicExpression{thenState.PathCondition, cond},
 				symbolic.AND,
 			)
-			out = append(out, &Item{value: thenState, block: block.Succs[0], instrIdx: 0})
+			out = append(out, &Item{value: thenState, block: block.Succs[0], instrIdx: 0, pred: block})
 		}
 		if len(i.Block().Succs) >= 2 {
 			elseState := *interpreter // копия
@@ -84,13 +86,30 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 				[]symbolic.SymbolicExpression{elseState.PathCondition, notCond},
 				symbolic.AND,
 			)
-			out = append(out, &Item{value: elseState, block: block.Succs[1], instrIdx: 0})
+			out = append(out, &Item{value: elseState, block: block.Succs[1], instrIdx: 0, pred: block})
 		}
 		return out
 	case *ssa.BinOp:
-		// symExpr := interpreter.resolveExpression(i)
-		// fmt.Printf("SymExpr: %s\n", symExpr.String())
-		return nextInSameBlock(*interpreter, block, instrIdx)
+		symExpr := interpreter.resolveExpression(i)
+		interpreter.Env[i] = symExpr
+
+		return nextInSameBlock(*interpreter, block, instrIdx, pred)
+	case *ssa.UnOp:
+		symExpr := interpreter.resolveExpression(i)
+		interpreter.Env[i] = symExpr
+
+		return nextInSameBlock(*interpreter, block, instrIdx, pred)
+	case *ssa.Phi:
+		edge, ok := pickPhiEdge(i, block, pred)
+		if !ok {
+			panic("phi: can't pick edge (pred is nil or not found)")
+		}
+		phiVal := interpreter.resolveExpression(edge)
+
+		interpreter.Env[i] = phiVal
+
+		return nextInSameBlock(*interpreter, block, instrIdx, pred)
+
 	default:
 		panic(fmt.Sprintf("Support %T!", i))
 	}
@@ -100,6 +119,10 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	if value == nil {
 		fmt.Println("resolveExpression with nil!")
 		return nil
+	}
+
+	if e, ok := interpreter.Env[value]; ok {
+		return e
 	}
 
 	switch v := value.(type) {
@@ -153,17 +176,18 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	// Op X
 	// One of: NOT SUB ARROW MUL XOR ! - <- * ^
 	case *ssa.UnOp:
-		// switch x.Op {
-		// case token.NOT:
-		// return symbolic.NewLogicalOperation([]symbolic.SymbolicExpression{operand}, symbolic.NOT)
-		// case token.SUB:
-		// у тебя нет унарного минуса как отдельного узла — можно кодировать как (0 - operand)
-		// zero := symbolic.NewIntConstant(0)
-		// return symbolic.NewBinaryOperation(zero, operand, symbolic.SUB)
-		// default:
-		// return symbolic.NewSymbolicVariable(x.Name(), goTypeToSym(x.Type()))
-		// }
-		panic("Support me!")
+		operand := interpreter.resolveExpression(v.X)
+
+		switch v.Op {
+		case token.NOT:
+			return symbolic.NewLogicalOperation([]symbolic.SymbolicExpression{operand}, symbolic.NOT)
+		case token.SUB:
+			// у тебя нет унарного минуса как отдельного узла — можно кодировать как (0 - operand)
+			zero := symbolic.NewIntConstant(0)
+			return symbolic.NewBinaryOperation(zero, operand, symbolic.SUB)
+		default:
+			return symbolic.NewSymbolicVariable(v.Name(), goTypeToSym(v.Type()))
+		}
 
 	// The Call instruction represents a function or method call.
 	case *ssa.Call:
@@ -177,11 +201,6 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		// name = x.Call.StaticCallee().Name()
 		// }
 		// return symbolic.NewFunctionCall(name, args, goTypeToSym(x.Type()))
-		panic("Support me!")
-
-	case *ssa.Phi:
-		// phi корректнее обрабатывать на входе в блок (по pred), но чтоб “не падало”:
-		// return symbolic.NewSymbolicVariable(x.Name(), goTypeToSym(x.Type()))
 		panic("Support me!")
 
 	default:
@@ -239,15 +258,29 @@ func goTypeToSym(t types.Type) symbolic.ExpressionType {
 	return symbolic.IntType
 }
 
-func nextInSameBlock(st Interpreter, block *ssa.BasicBlock, instrIdx int) []*Item {
+func nextInSameBlock(st Interpreter, block *ssa.BasicBlock, instrIdx int, pred *ssa.BasicBlock) []*Item {
 	nxt := instrIdx + 1
 	if nxt < len(block.Instrs) {
-		return []*Item{{value: st, block: block, instrIdx: nxt}}
+		return []*Item{{value: st, block: block, instrIdx: nxt, pred: pred}}
 	}
-	// если вдруг дошли до конца (редко), можно уйти по succs
 	out := make([]*Item, 0, len(block.Succs))
 	for _, s := range block.Succs {
-		out = append(out, &Item{value: st, block: s, instrIdx: 0})
+		out = append(out, &Item{value: st, block: s, instrIdx: 0, pred: block})
 	}
 	return out
+}
+
+func pickPhiEdge(phi *ssa.Phi, block *ssa.BasicBlock, pred *ssa.BasicBlock) (ssa.Value, bool) {
+	if pred == nil {
+		return nil, false
+	}
+	for idx, p := range block.Preds {
+		if p == pred {
+			if idx < 0 || idx >= len(phi.Edges) {
+				return nil, false
+			}
+			return phi.Edges[idx], true
+		}
+	}
+	return nil, false
 }

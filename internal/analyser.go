@@ -65,7 +65,7 @@ func (analyser *Analyser) Analyse(source string, functionName string) []Interpre
 		}
 
 		st := it.value
-		nextItems := (&st).interpretDynamically(it.block, it.instrIdx)
+		nextItems := (&st).interpretDynamically(it.block, it.instrIdx, it.pred)
 
 		for _, ni := range nextItems {
 			ni.priority = selector.CalculatePriority(ni.value)

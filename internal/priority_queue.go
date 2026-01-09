@@ -7,6 +7,7 @@ import (
 type Item struct {
 	value    Interpreter
 	block    *ssa.BasicBlock
+	pred     *ssa.BasicBlock // Нужен для ssa.Phi
 	instrIdx int
 	priority int
 	index    int
