@@ -65,7 +65,13 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 	case *ssa.Select:
 		panic("Support me!")
 	case *ssa.Store:
-		panic("Support me!")
+		interpreter.resolveExpression(i.Addr)
+		val := interpreter.resolveExpression(i.Val)
+
+		ref := interpreter.Heap.LookupRef(i.Addr.Name())
+		interpreter.Heap.AssignValue(ref, val)
+
+		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 	case *ssa.Jump:
 		out := make([]*Item, 0, len(block.Succs))
 		for _, s := range block.Succs {
@@ -132,6 +138,7 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	switch v := value.(type) {
 	// A Parameter represents an input parameter of a function.
 	case *ssa.Parameter:
+		// TODO Надо определить стратегию как все таки преобразовывать Ref
 		ref := interpreter.Heap.ParamRef(v.Name(), goTypeToSym(v.Type()))
 		return interpreter.Heap.GetValue(ref)
 
@@ -183,6 +190,15 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	*/
 	case *ssa.UnOp:
 		operand := interpreter.resolveExpression(v.X)
+
+		// WARNING: Из-за того что был применен грязный хак при резолве параметра, то мы уже
+		// отдаем take из кучи по параметру, из-за этого нет возможности отдать сырой указатель при резолве,
+		// но в данном кейсе можно просто отдать операнд
+		//
+		// TODO По уму бы отдавать сырой указатель и тут брать из кучи
+		if v.Op == token.MUL {
+			return operand
+		}
 
 		if sop, ok := tokenToUnOp(v.Op); ok {
 			return symbolic.NewUnaryOperation(operand, sop)
@@ -252,7 +268,7 @@ func tokenToUnOp(op token.Token) (symbolic.UnaryOperator, bool) {
 	case token.XOR:
 		return symbolic.UXOR, true
 	default:
-		panic("Not impl!")
+		panic(fmt.Sprintf("Not impl! %s", op.String()))
 	}
 }
 

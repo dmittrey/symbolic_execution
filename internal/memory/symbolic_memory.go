@@ -6,6 +6,8 @@ import (
 )
 
 type Memory interface {
+	LookupRef(name string) *symbolic.Ref
+
 	ParamRef(name string, tpe symbolic.ExpressionType) *symbolic.Ref
 
 	ParamStructRef(name string, typeName string, fields []symbolic.ExpressionType) *symbolic.Ref
@@ -69,6 +71,17 @@ func NewSymbolicMemory() *SymbolicMemory {
 
 		ArraysSegment: make(map[int]*symbolic.Array),
 	}
+}
+
+func (mem *SymbolicMemory) LookupRef(name string) *symbolic.Ref {
+	r, ok := mem.ParamNameToRef[name]
+	if ok {
+		// If Ref is found by name, return it, otherwirse go to create new
+		return r
+	}
+
+	// Fallback
+	return nil
 }
 
 func (mem *SymbolicMemory) ParamRef(name string, tpe symbolic.ExpressionType) *symbolic.Ref {
