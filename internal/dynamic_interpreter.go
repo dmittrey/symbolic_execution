@@ -42,6 +42,7 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 	}
 
 	instr := block.Instrs[instrIdx]
+	fmt.Printf("interpretDynamically: %s\n", instr.String())
 
 	if instr == nil {
 		fmt.Println("interpretDynamically with nil!")
@@ -125,6 +126,8 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		fmt.Println("resolveExpression with nil!")
 		return nil
 	}
+
+	fmt.Printf("resolveExpression: %s\n", value.String())
 
 	if e, ok := interpreter.Env[value]; ok {
 		return e
