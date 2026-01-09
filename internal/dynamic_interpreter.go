@@ -89,11 +89,7 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 		}
 		if len(i.Block().Succs) >= 2 {
 			elseState := *interpreter // копия
-			notCond := symbolic.NewBinaryOperation(
-				cond,
-				symbolic.NewBoolConstant(true), //TODO Add unary
-				symbolic.AND_NOT,
-			)
+			notCond := symbolic.NewUnaryOperation(cond, symbolic.NOT)
 			elseState.PathCondition = symbolic.NewBinaryOperation(
 				elseState.PathCondition,
 				notCond,
