@@ -98,16 +98,6 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 			out = append(out, &Item{value: elseState, block: block.Succs[1], instrIdx: 0, pred: block})
 		}
 		return out
-	case *ssa.BinOp:
-		symExpr := interpreter.resolveExpression(i)
-		interpreter.Env[i] = symExpr
-
-		return nextInSameBlock(*interpreter, block, instrIdx, pred)
-	case *ssa.UnOp:
-		symExpr := interpreter.resolveExpression(i)
-		interpreter.Env[i] = symExpr
-
-		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 	case *ssa.Phi:
 		edge, ok := pickPhiEdge(i, block, pred)
 		if !ok {
@@ -119,6 +109,9 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 
+	// Instructions that also implement Value interface will resolve later
+	case *ssa.BinOp, *ssa.UnOp:
+		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 	default:
 		panic(fmt.Sprintf("Support %T!", i))
 	}
@@ -191,7 +184,7 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		case token.NOT:
 			return symbolic.NewLogicalOperation([]symbolic.SymbolicExpression{operand}, symbolic.NOT)
 		case token.SUB:
-			// у тебя нет унарного минуса как отдельного узла — можно кодировать как (0 - operand)
+			// Унарный минус (0 - X)
 			zero := symbolic.NewIntConstant(0)
 			return symbolic.NewBinaryOperation(zero, operand, symbolic.SUB)
 		default:
