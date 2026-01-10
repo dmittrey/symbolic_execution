@@ -85,12 +85,10 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 			}
 
 			idxExpr := interpreter.resolveExpression(a.Index)
-			ic, ok := idxExpr.(*symbolic.IntConstant)
-			if !ok {
-				panic(fmt.Sprintf("Store: Index must be const int, got %T (%s)", idxExpr, idxExpr.String()))
+			if idxExpr.Type() != symbolic.IntType {
+				panic(fmt.Sprintf("Store: Index must be int, got %T (%s)", idxExpr, idxExpr.String()))
 			}
-
-			interpreter.Heap.AssignToArray(br, int(ic.Value), val)
+			interpreter.Heap.AssignToArray(br, idxExpr, val)
 
 		default:
 			addrExpr := interpreter.resolveExpression(i.Addr)
@@ -329,12 +327,10 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 				}
 
 				idxExpr := interpreter.resolveExpression(ia.Index)
-				ic, ok := idxExpr.(*symbolic.IntConstant)
-				if !ok {
-					panic(fmt.Sprintf("Load: Index must be const int, got %T (%s)", idxExpr, idxExpr.String()))
+				if idxExpr.Type() != symbolic.IntType {
+					panic(fmt.Sprintf("Load: Index must be int, got %T (%s)", idxExpr, idxExpr.String()))
 				}
-
-				return interpreter.Heap.GetFromArray(br, int(ic.Value))
+				return interpreter.Heap.GetFromArray(br, idxExpr)
 			}
 
 			// Primitive ref

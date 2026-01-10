@@ -453,9 +453,11 @@ func (op UnaryOperator) String() string {
 }
 
 type Ref struct {
-	Idx     *SymbolicVariable
+	Idx     SymbolicExpression
 	OwnType ExpressionType
 	RefType ExpressionType
+
+	ElemType ExpressionType
 }
 
 func NewRef(idx int64, refType ExpressionType) *Ref {
@@ -465,13 +467,28 @@ func NewRef(idx int64, refType ExpressionType) *Ref {
 		RefType: refType,
 	}
 }
+func NewRefFromExpr(addr SymbolicExpression, refType ExpressionType) *Ref {
+	if addr == nil || addr.Type() != IntType {
+		panic("NewRefFromExpr: addr must be IntType (BV64)")
+	}
+	return &Ref{
+		Idx:     addr,
+		OwnType: RefType,
+		RefType: refType,
+	}
+}
+func NewArrayRefFromExpr(addr SymbolicExpression, elemType ExpressionType) *Ref {
+	r := NewRefFromExpr(addr, ArrayType)
+	r.ElemType = elemType
+	return r
+}
 
 func (r *Ref) Type() ExpressionType {
 	return r.OwnType
 }
 
 func (r *Ref) String() string {
-	return fmt.Sprintf("&%s", r.Idx.String())
+	return fmt.Sprintf("&(%s)", r.Idx.String())
 }
 
 func (r *Ref) Accept(visitor Visitor) interface{} {

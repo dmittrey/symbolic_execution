@@ -60,7 +60,7 @@ func (st Interpreter) Dump() string {
 			fmt.Fprintf(&b, "    ParamsList:\n")
 			for i, r := range mem.Params {
 				if r.RefType == symbolic.ArrayType {
-					elem := mem.ArrayElemType[r.Idx]
+					elem := r.ElemType
 					fmt.Fprintf(&b, "      P[%d]: %s (refType=%s, elem=%s)\n",
 						i, r.String(), r.RefType.String(), elem.String())
 				} else {
@@ -75,7 +75,7 @@ func (st Interpreter) Dump() string {
 			fmt.Fprintf(&b, "    AllocationsList:\n")
 			for i, r := range mem.Allocations {
 				if r.RefType == symbolic.ArrayType {
-					elem := mem.ArrayElemType[r.Idx]
+					elem := r.ElemType
 					fmt.Fprintf(&b, "      A[%d]: %s (refType=%s, elem=%s)\n",
 						i, r.String(), r.RefType.String(), elem.String())
 				} else {
@@ -108,16 +108,16 @@ func (st Interpreter) Dump() string {
 		if len(mem.ArraysSegment) == 0 {
 			fmt.Fprintf(&b, "    ArraysSegment: <empty>\n")
 		} else {
-			keys := make([]int, 0, len(mem.ArraysSegment))
+			keys := make([]string, 0, len(mem.ArraysSegment))
 			for k := range mem.ArraysSegment {
 				keys = append(keys, k)
 			}
-			sort.Ints(keys)
+			sort.Strings(keys)
 
 			fmt.Fprintf(&b, "    ArraysSegment: %d key(s)\n", len(keys))
 			for _, k := range keys {
 				arr := mem.ArraysSegment[k]
-				fmt.Fprintf(&b, "      key=%d: %s\n", k, dumpArray(arr, 20))
+				fmt.Fprintf(&b, "      key=%s: %s\n", k, dumpArray(arr, 20))
 			}
 		}
 
@@ -139,26 +139,26 @@ func (st Interpreter) Dump() string {
 				fmt.Fprintf(&b, "      T[%d]: %s\n", idx, name)
 			}
 
-			// RefToTypeIdx: map[*SymbolicVariable]int (addr_0 -> typeIdx)
+			// RefToTypeIdx: map[string]int ("addr_0" -> typeIdx)
 			if len(mem.RefToTypeIdx) > 0 {
-				vars := make([]*symbolic.SymbolicVariable, 0, len(mem.RefToTypeIdx))
-				for v := range mem.RefToTypeIdx {
-					vars = append(vars, v)
+				keys := make([]string, 0, len(mem.RefToTypeIdx))
+				for k := range mem.RefToTypeIdx {
+					keys = append(keys, k)
 				}
 
-				sort.Slice(vars, func(i, j int) bool {
-					return addrVarOrderKey(vars[i]) < addrVarOrderKey(vars[j])
+				sort.Slice(keys, func(i, j int) bool {
+					return addrKeyOrder(keys[i]) < addrKeyOrder(keys[j])
 				})
 
-				fmt.Fprintf(&b, "    RefToTypeIdx: %d\n", len(vars))
-				for _, v := range vars {
-					typeIdx := mem.RefToTypeIdx[v]
+				fmt.Fprintf(&b, "    RefToTypeIdx: %d\n", len(keys))
+				for _, k := range keys {
+					typeIdx := mem.RefToTypeIdx[k]
 					typeName := idxToName[typeIdx]
 					if typeName == "" {
 						typeName = "<unknown>"
 					}
-					// печатаем как "&addr_N", чтобы было похоже на Ref.String()
-					fmt.Fprintf(&b, "      &%s -> T[%d] (%s)\n", v.Name, typeIdx, typeName)
+					// k = "addr_N" → печатаем "&addr_N"
+					fmt.Fprintf(&b, "      &%s -> T[%d] (%s)\n", k, typeIdx, typeName)
 				}
 			} else {
 				fmt.Fprintf(&b, "    RefToTypeIdx: <empty>\n")
@@ -168,17 +168,18 @@ func (st Interpreter) Dump() string {
 			if len(mem.RefToTypeIdx) > 0 {
 				fmt.Fprintf(&b, "    StructTypes: <empty>\n")
 
-				vars := make([]*symbolic.SymbolicVariable, 0, len(mem.RefToTypeIdx))
-				for v := range mem.RefToTypeIdx {
-					vars = append(vars, v)
+				keys := make([]string, 0, len(mem.RefToTypeIdx))
+				for k := range mem.RefToTypeIdx {
+					keys = append(keys, k)
 				}
-				sort.Slice(vars, func(i, j int) bool {
-					return addrVarOrderKey(vars[i]) < addrVarOrderKey(vars[j])
+
+				sort.Slice(keys, func(i, j int) bool {
+					return addrKeyOrder(keys[i]) < addrKeyOrder(keys[j])
 				})
 
-				fmt.Fprintf(&b, "    RefToTypeIdx: %d\n", len(vars))
-				for _, v := range vars {
-					fmt.Fprintf(&b, "      &%s -> T[%d]\n", v.Name, mem.RefToTypeIdx[v])
+				fmt.Fprintf(&b, "    RefToTypeIdx: %d\n", len(keys))
+				for _, k := range keys {
+					fmt.Fprintf(&b, "      &%s -> T[%d]\n", k, mem.RefToTypeIdx[k])
 				}
 			}
 		}
@@ -242,6 +243,16 @@ func addrVarOrderKey(v *symbolic.SymbolicVariable) int {
 	}
 	s := v.Name // ожидаем "addr_N"
 	s = strings.TrimPrefix(s, "addr_")
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 1 << 30
+	}
+	return n
+}
+
+func addrKeyOrder(k string) int {
+	// ожидаем "addr_N"
+	s := strings.TrimPrefix(k, "addr_")
 	n, err := strconv.Atoi(s)
 	if err != nil {
 		return 1 << 30
