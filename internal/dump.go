@@ -140,48 +140,48 @@ func (st Interpreter) Dump() string {
 			}
 
 			// RefToTypeIdx: map[string]int ("addr_0" -> typeIdx)
-			if len(mem.RefToTypeIdx) > 0 {
-				keys := make([]string, 0, len(mem.RefToTypeIdx))
-				for k := range mem.RefToTypeIdx {
-					keys = append(keys, k)
-				}
+			// if len(mem.RefToTypeIdx) > 0 {
+			// 	keys := make([]string, 0, len(mem.RefToTypeIdx))
+			// 	for k := range mem.RefToTypeIdx {
+			// 		keys = append(keys, k)
+			// 	}
 
-				sort.Slice(keys, func(i, j int) bool {
-					return addrKeyOrder(keys[i]) < addrKeyOrder(keys[j])
-				})
+			// 	sort.Slice(keys, func(i, j int) bool {
+			// 		return addrKeyOrder(keys[i]) < addrKeyOrder(keys[j])
+			// 	})
 
-				fmt.Fprintf(&b, "    RefToTypeIdx: %d\n", len(keys))
-				for _, k := range keys {
-					typeIdx := mem.RefToTypeIdx[k]
-					typeName := idxToName[typeIdx]
-					if typeName == "" {
-						typeName = "<unknown>"
-					}
-					// k = "addr_N" → печатаем "&addr_N"
-					fmt.Fprintf(&b, "      &%s -> T[%d] (%s)\n", k, typeIdx, typeName)
-				}
-			} else {
-				fmt.Fprintf(&b, "    RefToTypeIdx: <empty>\n")
-			}
+			// 	fmt.Fprintf(&b, "    RefToTypeIdx: %d\n", len(keys))
+			// 	for _, k := range keys {
+			// 		typeIdx := mem.RefToTypeIdx[k]
+			// 		typeName := idxToName[typeIdx]
+			// 		if typeName == "" {
+			// 			typeName = "<unknown>"
+			// 		}
+			// 		// k = "addr_N" → печатаем "&addr_N"
+			// 		fmt.Fprintf(&b, "      &%s -> T[%d] (%s)\n", k, typeIdx, typeName)
+			// 	}
+			// } else {
+			// 	fmt.Fprintf(&b, "    RefToTypeIdx: <empty>\n")
+			// }
 		} else {
 			// на всякий случай: типы пустые, но ссылки есть
-			if len(mem.RefToTypeIdx) > 0 {
-				fmt.Fprintf(&b, "    StructTypes: <empty>\n")
+			// if len(mem.RefToTypeIdx) > 0 {
+			// 	fmt.Fprintf(&b, "    StructTypes: <empty>\n")
 
-				keys := make([]string, 0, len(mem.RefToTypeIdx))
-				for k := range mem.RefToTypeIdx {
-					keys = append(keys, k)
-				}
+			// 	keys := make([]string, 0, len(mem.RefToTypeIdx))
+			// 	for k := range mem.RefToTypeIdx {
+			// 		keys = append(keys, k)
+			// 	}
 
-				sort.Slice(keys, func(i, j int) bool {
-					return addrKeyOrder(keys[i]) < addrKeyOrder(keys[j])
-				})
+			// 	sort.Slice(keys, func(i, j int) bool {
+			// 		return addrKeyOrder(keys[i]) < addrKeyOrder(keys[j])
+			// 	})
 
-				fmt.Fprintf(&b, "    RefToTypeIdx: %d\n", len(keys))
-				for _, k := range keys {
-					fmt.Fprintf(&b, "      &%s -> T[%d]\n", k, mem.RefToTypeIdx[k])
-				}
-			}
+			// 	fmt.Fprintf(&b, "    RefToTypeIdx: %d\n", len(keys))
+			// 	for _, k := range keys {
+			// 		fmt.Fprintf(&b, "      &%s -> T[%d]\n", k, mem.RefToTypeIdx[k])
+			// 	}
+			// }
 		}
 
 		fmt.Fprintf(&b, "  }\n")

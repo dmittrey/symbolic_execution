@@ -176,6 +176,11 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 
 		// []T
 		if sl, ok := v.Type().Underlying().(*types.Slice); ok {
+			// если элемент — struct/*struct (включая []*T)
+			if typeName, fields, ok := structMeta(sl.Elem()); ok {
+				return interpreter.Heap.ParamArrayStructRef(v.Name(), typeName, fields)
+			}
+
 			elemTy := goTypeToSym(sl.Elem())
 			return interpreter.Heap.ParamArrayRef(v.Name(), elemTy)
 		}
@@ -253,9 +258,14 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 			panic(fmt.Sprintf("MakeSlice: unexpected type %T (%s)", v.Type().Underlying(), v.Type().String()))
 		}
 
+		if typeName, fields, ok := structMeta(sl.Elem()); ok {
+			res := interpreter.Heap.AllocateArrayStruct(typeName, fields)
+			interpreter.Env[v] = res
+			return res
+		}
+
 		elemTy := goTypeToSym(sl.Elem())
 		res := interpreter.Heap.AllocateArray(elemTy)
-
 		interpreter.Env[v] = res
 		return res
 

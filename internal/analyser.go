@@ -28,7 +28,7 @@ func NewAnalyser() Analyser {
 }
 
 func (analyser *Analyser) Analyse(source string, functionName string) []Interpreter {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
 	builder := ssa.NewBuilder()

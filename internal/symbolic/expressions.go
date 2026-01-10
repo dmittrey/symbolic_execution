@@ -457,7 +457,12 @@ type Ref struct {
 	OwnType ExpressionType
 	RefType ExpressionType
 
+	// array refs
 	ElemType ExpressionType
+
+	// struct refs
+	StructTypeIdx     int // какой именно struct type
+	ElemStructTypeIdx int // если RefType==ArrayType && ElemType==StructType
 }
 
 func NewRef(idx int64, refType ExpressionType) *Ref {
@@ -465,22 +470,25 @@ func NewRef(idx int64, refType ExpressionType) *Ref {
 		Idx:     NewSymbolicVariable(fmt.Sprintf("addr_%d", idx), IntType),
 		OwnType: RefType,
 		RefType: refType,
+
+		ElemType:          -1,
+		StructTypeIdx:     -1,
+		ElemStructTypeIdx: -1,
 	}
 }
-func NewRefFromExpr(addr SymbolicExpression, refType ExpressionType) *Ref {
-	if addr == nil || addr.Type() != IntType {
-		panic("NewRefFromExpr: addr must be IntType (BV64)")
+func NewRefExpr(idx SymbolicExpression, refType ExpressionType) *Ref {
+	if idx == nil || idx.Type() != IntType {
+		panic(fmt.Sprintf("NewRefExpr: idx must be int expression, got %T (%v)", idx, idx))
 	}
 	return &Ref{
-		Idx:     addr,
+		Idx:     idx,
 		OwnType: RefType,
 		RefType: refType,
+
+		ElemType:          -1,
+		StructTypeIdx:     -1,
+		ElemStructTypeIdx: -1,
 	}
-}
-func NewArrayRefFromExpr(addr SymbolicExpression, elemType ExpressionType) *Ref {
-	r := NewRefFromExpr(addr, ArrayType)
-	r.ElemType = elemType
-	return r
 }
 
 func (r *Ref) Type() ExpressionType {
