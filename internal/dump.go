@@ -59,7 +59,14 @@ func (st Interpreter) Dump() string {
 		if len(mem.Params) > 0 {
 			fmt.Fprintf(&b, "    ParamsList:\n")
 			for i, r := range mem.Params {
-				fmt.Fprintf(&b, "      P[%d]: %s (refType=%s)\n", i, r.String(), r.RefType.String())
+				if r.RefType == symbolic.ArrayType {
+					elem := mem.ArrayElemType[r.Idx]
+					fmt.Fprintf(&b, "      P[%d]: %s (refType=%s, elem=%s)\n",
+						i, r.String(), r.RefType.String(), elem.String())
+				} else {
+					fmt.Fprintf(&b, "      P[%d]: %s (refType=%s)\n",
+						i, r.String(), r.RefType.String())
+				}
 			}
 		}
 
@@ -67,7 +74,14 @@ func (st Interpreter) Dump() string {
 		if len(mem.Allocations) > 0 {
 			fmt.Fprintf(&b, "    AllocationsList:\n")
 			for i, r := range mem.Allocations {
-				fmt.Fprintf(&b, "      A[%d]: %s (refType=%s)\n", i, r.String(), r.RefType.String())
+				if r.RefType == symbolic.ArrayType {
+					elem := mem.ArrayElemType[r.Idx]
+					fmt.Fprintf(&b, "      A[%d]: %s (refType=%s, elem=%s)\n",
+						i, r.String(), r.RefType.String(), elem.String())
+				} else {
+					fmt.Fprintf(&b, "      A[%d]: %s (refType=%s)\n",
+						i, r.String(), r.RefType.String())
+				}
 			}
 		}
 

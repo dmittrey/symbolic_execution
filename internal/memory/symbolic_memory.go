@@ -55,6 +55,7 @@ type SymbolicMemory struct {
 
 	// Arrays
 	ArraysSegment map[int]*symbolic.Array
+	ArrayElemType map[*symbolic.SymbolicVariable]symbolic.ExpressionType
 }
 
 func NewSymbolicMemory() *SymbolicMemory {
@@ -74,6 +75,7 @@ func NewSymbolicMemory() *SymbolicMemory {
 		FieldsSegment: make(map[int]map[int]*symbolic.Array),
 
 		ArraysSegment: make(map[int]*symbolic.Array),
+		ArrayElemType: make(map[*symbolic.SymbolicVariable]symbolic.ExpressionType),
 	}
 }
 
@@ -145,6 +147,8 @@ func (mem *SymbolicMemory) ParamArrayRef(name string, tp symbolic.ExpressionType
 	r = symbolic.NewRef(mem.nextId(), symbolic.ArrayType)
 	mem.Params = append(mem.Params, r)
 	mem.ParamNameToRef[name] = r
+
+	mem.ArrayElemType[r.Idx] = tp
 
 	return r
 }
@@ -236,6 +240,8 @@ func (mem *SymbolicMemory) GetFieldValue(ref *symbolic.Ref, fieldIdx int) symbol
 func (mem *SymbolicMemory) AllocateArray(tp symbolic.ExpressionType) *symbolic.Ref {
 	r := symbolic.NewRef(mem.nextId(), symbolic.ArrayType)
 	mem.Allocations = append(mem.Allocations, r)
+
+	mem.ArrayElemType[r.Idx] = tp
 
 	return r
 }
