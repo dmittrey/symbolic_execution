@@ -147,7 +147,9 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 
 	// Instructions that also implement Value interface will resolve later
-	case *ssa.BinOp, *ssa.UnOp, *ssa.FieldAddr, *ssa.IndexAddr:
+	case *ssa.BinOp, *ssa.UnOp,
+		*ssa.FieldAddr, *ssa.IndexAddr,
+		*ssa.Slice, *ssa.Alloc:
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 	default:
 		panic(fmt.Sprintf("Support %T!", i))
@@ -183,13 +185,69 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		// *T (указатель на примитив/строку)
 		if p, ok := v.Type().Underlying().(*types.Pointer); ok {
 			elemTy := goTypeToSym(p.Elem())
-			return interpreter.Heap.ParamRef(v.Name(), elemTy) // ВАЖНО: возвращаем ref, не GetValue
+			return interpreter.Heap.ParamRef(v.Name(), elemTy)
 		}
 
 		// обычные примитивы
 		ty := goTypeToSym(v.Type())
 		ref := interpreter.Heap.ParamRef(v.Name(), ty)
 		return interpreter.Heap.GetValue(ref)
+
+	/*
+		The Alloc instruction:
+		1. reserves space for a variable of the given type,
+		2. zero-initializes it, TODO??? (In my case its z3.Value and solver decide which value it is when no assertations)
+		3. yields its address.
+
+		Alloc values are always addresses, and have pointer types, so the
+		type of the allocated variable is actually
+		Type().Underlying().(*types.Pointer).Elem().
+	*/
+	case *ssa.Alloc:
+		var res symbolic.SymbolicExpression
+
+		// struct / *struct
+		if typeName, fields, ok := structMeta(v.Type()); ok {
+			res = interpreter.Heap.AllocateStruct(typeName, fields)
+			interpreter.Env[v] = res
+			return res
+		}
+
+		// []T
+		if sl, ok := v.Type().Underlying().(*types.Slice); ok {
+			elemTy := goTypeToSym(sl.Elem())
+			res = interpreter.Heap.AllocateArray(elemTy)
+			interpreter.Env[v] = res
+			return res
+		}
+
+		// pointer/array-like (твой текущий хак)
+		if p, ok := v.Type().Underlying().(*types.Pointer); ok {
+			elemTy := goTypeToSym(p.Elem())
+			res = interpreter.Heap.AllocateArray(elemTy)
+			interpreter.Env[v] = res
+			return res
+		}
+
+		// Primitive
+		ty := goTypeToSym(v.Type())
+		ref := interpreter.Heap.Allocate(ty)
+		res = interpreter.Heap.GetValue(ref)
+
+		interpreter.Env[v] = res
+		return res
+
+	/*
+		The Slice instruction yields a slice of an existing string, slice
+		or *array X between optional integer bounds Low and High.
+
+		Type() returns string if the type of X was string, otherwise a
+		*types.Slice with the same element type as X.
+	*/
+	case *ssa.Slice:
+		res := interpreter.resolveExpression(v.X) // TODO Support slices
+		interpreter.Env[v] = res
+		return res
 
 	// IntConstant, BoolConstant, StringConstant
 	case *ssa.Const:
@@ -240,7 +298,7 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	case *ssa.UnOp:
 		// 1) СНАЧАЛА special-case для load: *X
 		if v.Op == token.MUL {
-			// вариант 1: X это &foo2.a (т.е. FieldAddr value)
+			// &foo2.a
 			if fa, ok := v.X.(*ssa.FieldAddr); ok {
 				base := interpreter.resolveExpression(fa.X) // fa.X = foo2
 				br, ok := base.(*symbolic.Ref)
@@ -250,6 +308,7 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 				return interpreter.Heap.GetFieldValue(br, fa.Field)
 			}
 
+			// &foo2[Index]
 			if ia, ok := v.X.(*ssa.IndexAddr); ok {
 				base := interpreter.resolveExpression(ia.X)
 				br, ok := base.(*symbolic.Ref)
@@ -266,7 +325,7 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 				return interpreter.Heap.GetFromArray(br, int(ic.Value))
 			}
 
-			// вариант 2: X это обычный ref (если потом появится)
+			// Primitive ref
 			addrExpr := interpreter.resolveExpression(v.X)
 			r, ok := addrExpr.(*symbolic.Ref)
 			if !ok {
@@ -350,6 +409,7 @@ func tokenToUnOp(op token.Token) (symbolic.UnaryOperator, bool) {
 	}
 }
 
+// TODO Внести всю логику выведения типов в эту функцию и не размазывать по интерпретатору
 func goTypeToSym(t types.Type) symbolic.ExpressionType {
 	if t == nil {
 		panic("nil")
@@ -369,6 +429,8 @@ func goTypeToSym(t types.Type) symbolic.ExpressionType {
 		return goTypeToSym(tt.Elem())
 	case *types.Struct:
 		return symbolic.StructType
+	case *types.Array:
+		return goTypeToSym(tt.Elem())
 	default:
 		panic(fmt.Sprintf("Not impl: %T\n", tt))
 	}
