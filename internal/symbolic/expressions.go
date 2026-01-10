@@ -124,9 +124,9 @@ func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *Bina
 		(op == EQ || op == NE):
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 
-	// case lt == RefType && rt == RefType &&
-	// (op == EQ || op == NE):
-	// return &BinaryOperation{Left: left.(*Ref).Idx, Right: right.(*Ref).Idx, Operator: op}
+	case lt == RefType && rt == RefType &&
+		(op == EQ || op == NE):
+		return &BinaryOperation{Left: left.(*Ref).Idx, Right: right.(*Ref).Idx, Operator: op}
 
 	default:
 		// return &BinaryOperation{Left: left, Right: right, Operator: op}
