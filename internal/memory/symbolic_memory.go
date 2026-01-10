@@ -271,9 +271,11 @@ func (mem *SymbolicMemory) GetFromArray(ref *symbolic.Ref, index int) symbolic.S
 		panic("GetFromArray: ref is not array")
 	}
 
+	elemTy := mem.ArrayElemType[ref.Idx]
+
 	arr := mem.ArraysSegment[index]
 	if arr == nil {
-		arr = symbolic.NewArray(fmt.Sprintf("Array_%d", index), symbolic.IntType)
+		arr = symbolic.NewArray(fmt.Sprintf("Array_%d", index), elemTy)
 		mem.ArraysSegment[index] = arr
 	}
 
