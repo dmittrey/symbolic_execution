@@ -149,7 +149,7 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 	// Instructions that also implement Value interface will resolve later
 	case *ssa.BinOp, *ssa.UnOp,
 		*ssa.FieldAddr, *ssa.IndexAddr,
-		*ssa.Slice, *ssa.Alloc:
+		*ssa.Slice, *ssa.MakeSlice, *ssa.Alloc:
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 	default:
 		panic(fmt.Sprintf("Support %T!", i))
@@ -246,6 +246,18 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	*/
 	case *ssa.Slice:
 		res := interpreter.resolveExpression(v.X) // TODO Support slices
+		interpreter.Env[v] = res
+		return res
+
+	case *ssa.MakeSlice:
+		sl, ok := v.Type().Underlying().(*types.Slice)
+		if !ok {
+			panic(fmt.Sprintf("MakeSlice: unexpected type %T (%s)", v.Type().Underlying(), v.Type().String()))
+		}
+
+		elemTy := goTypeToSym(sl.Elem())
+		res := interpreter.Heap.AllocateArray(elemTy)
+
 		interpreter.Env[v] = res
 		return res
 
