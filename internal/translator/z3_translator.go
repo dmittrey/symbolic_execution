@@ -11,14 +11,16 @@ import (
 
 // Z3Translator транслирует символьные выражения в Z3 формулы
 type Z3Translator struct {
-	ctx        *z3.Context
-	slv        *z3.Solver
-	config     *z3.Config
-	vars       map[string]z3.Value // Кэш переменных
+	ctx    *z3.Context
+	slv    *z3.Solver
+	config *z3.Config
+
+	// Var cache
+	vars map[string]z3.Value
+
+	// Sorts
 	stringSort z3.Sort
 	bvSort     z3.Sort
-
-	arraysInProgress map[*symbolic.Array]bool
 }
 
 // NewZ3Translator создаёт новый экземпляр Z3 транслятора
@@ -28,13 +30,12 @@ func NewZ3Translator() *Z3Translator {
 	slv := z3.NewSolver(ctx)
 
 	return &Z3Translator{
-		ctx:              ctx,
-		slv:              slv,
-		config:           config,
-		vars:             make(map[string]z3.Value),
-		stringSort:       ctx.UninterpretedSort("String"),
-		bvSort:           ctx.BVSort(64),
-		arraysInProgress: make(map[*symbolic.Array]bool),
+		ctx:        ctx,
+		slv:        slv,
+		config:     config,
+		vars:       make(map[string]z3.Value),
+		stringSort: ctx.UninterpretedSort("String"),
+		bvSort:     ctx.BVSort(64),
 	}
 }
 
@@ -45,7 +46,6 @@ func (zt *Z3Translator) Reset() {
 
 	zt.vars = make(map[string]z3.Value)
 	zt.stringSort = zt.ctx.UninterpretedSort("String")
-	zt.arraysInProgress = make(map[*symbolic.Array]bool)
 }
 
 func (zt *Z3Translator) Assert(expr interface{}) {
@@ -315,57 +315,6 @@ func (zt *Z3Translator) VisitUnaryOperation(expr *symbolic.UnaryOperation) inter
 	panic("Not impl type.")
 }
 
-func (zt *Z3Translator) VisitFunctionCall(expr *symbolic.FunctionCall) interface{} {
-	// 1) Переводим аргументы в Z3
-	argVals := make([]z3.Value, len(expr.Args))
-	for i, a := range expr.Args {
-		v, err := zt.TranslateExpression(a)
-		if err != nil {
-			panic(fmt.Sprintf("VisitFunctionCall(%s): translate arg %d: %v", expr.Name, i, err))
-		}
-		switch vv := v.(type) {
-		case z3.Int:
-			argVals[i] = z3.Value(vv)
-		case z3.Bool:
-			argVals[i] = z3.Value(vv)
-		case z3.Value:
-			argVals[i] = vv
-		default:
-			panic(fmt.Sprintf("VisitFunctionCall(%s): unsupported arg %d type %T", expr.Name, i, v))
-		}
-	}
-
-	// 2) Формируем доменные сорта из типов аргументов
-	domain := make([]z3.Sort, len(expr.Args))
-	for i, a := range expr.Args {
-		switch a.Type() {
-		case symbolic.IntType:
-			domain[i] = zt.bvSort
-		case symbolic.BoolType:
-			domain[i] = zt.ctx.BoolSort()
-		default:
-			panic(fmt.Sprintf("VisitFunctionCall(%s): unsupported arg sort #%d (%v)", expr.Name, i, a.Type()))
-		}
-	}
-
-	// 3) Результирующий сорт по RetType
-	var rng z3.Sort
-	switch expr.RetType {
-	case symbolic.IntType:
-		rng = zt.bvSort
-	case symbolic.BoolType:
-		rng = zt.ctx.BoolSort()
-	default:
-		panic(fmt.Sprintf("VisitFunctionCall(%s): unsupported return type %v", expr.Name, expr.RetType))
-	}
-
-	// 4) Объявляем uninterpreted function и делаем аппликацию
-	fd := zt.ctx.FuncDecl(expr.Name, domain, rng)
-
-	// Apply creates a Value representing the result of applying f to args
-	return fd.Apply(argVals...)
-}
-
 func (zt *Z3Translator) VisitConditionalExpression(expr *symbolic.ConditionalExpression) interface{} {
 	ift, err := zt.TranslateExpression(expr.IfOperand)
 	if err != nil {
@@ -402,86 +351,6 @@ func (zt *Z3Translator) VisitConditionalExpression(expr *symbolic.ConditionalExp
 	panic("VisitConditionalExpression: unsupported branch type (only Int/Bool supported)")
 }
 
-func (zt *Z3Translator) VisitArray(expr *symbolic.Array) interface{} {
-	// Индексный сорт — Int
-	idxSort := zt.bvSort
-
-	// Сорт элементов
-	var elemSort z3.Sort
-	switch expr.ValType {
-	case symbolic.IntType:
-		elemSort = zt.bvSort
-	case symbolic.BoolType:
-		elemSort = zt.ctx.BoolSort()
-	case symbolic.StringType:
-		elemSort = zt.stringSort
-	default:
-		panic("VisitArray: unsupported element type")
-	}
-
-	arrSort := zt.ctx.ArraySort(idxSort, elemSort)
-
-	// Если уже строим этот же массив — возвращаем "базовый" константный массив,
-	// чтобы не уйти в бесконечную рекурсию при select(store(arr,...),...)
-	if zt.arraysInProgress[expr] {
-		return zt.ctx.Const(expr.Name, arrSort).(z3.Array)
-	}
-
-	zt.arraysInProgress[expr] = true
-	defer delete(zt.arraysInProgress, expr)
-
-	// Базовый массив: константа Z3 (Array Int elemSort)
-	z3Arr := zt.ctx.Const(expr.Name, arrSort).(z3.Array)
-
-	// Накатываем все store'ы поверх базового массива
-	for i, st := range expr.Stores {
-		idxV, err := zt.TranslateExpression(st.Idx)
-		if err != nil {
-			panic(fmt.Sprintf("VisitArray: translate store #%d index: %v", i, err))
-		}
-		valV, err := zt.TranslateExpression(st.Val)
-		if err != nil {
-			panic(fmt.Sprintf("VisitArray: translate store #%d value: %v", i, err))
-		}
-
-		idx, ok := idxV.(z3.Value)
-		if !ok {
-			panic("VisitArray: store index is not z3.Value")
-		}
-		val, ok := valV.(z3.Value)
-		if !ok {
-			panic("VisitArray: store value is not z3.Value")
-		}
-
-		// Store возвращает НОВЫЙ массив, поэтому переприсваиваем
-		z3Arr = z3Arr.Store(idx, val)
-	}
-
-	return z3Arr
-}
-
-func (zt *Z3Translator) VisitArrayAccess(expr *symbolic.ArrayAccess) interface{} {
-	arrV, err := zt.TranslateExpression(expr.Arr)
-	if err != nil {
-		panic("VisitArrayAccess: translate Arr: " + err.Error())
-	}
-	idxV, err := zt.TranslateExpression(expr.Idx)
-	if err != nil {
-		panic("VisitArrayAccess: translate Idx: " + err.Error())
-	}
-
-	arr, ok := arrV.(z3.Array)
-	if !ok {
-		panic("VisitArrayAccess: Arr is not z3.Array")
-	}
-	idx, ok := idxV.(z3.Value)
-	if !ok {
-		panic("VisitArrayAccess: Idx is not z3.Value")
-	}
-
-	return arr.Select(idx)
-}
-
 func (zt *Z3Translator) VisitStringConstant(c *symbolic.StringConstant) interface{} {
 	return zt.ctx.Const("str_"+c.Value, zt.stringSort)
 }
@@ -500,6 +369,7 @@ func (zt *Z3Translator) createZ3Variable(name string, exprType symbolic.Expressi
 	case symbolic.ArrayType:
 		arrSort := zt.ctx.ArraySort(zt.bvSort, zt.bvSort)
 		return zt.ctx.Const(name, arrSort)
+	// TODO Возможно добавить BaseType в SymExpr и также VectorType
 	default:
 		panic("Not impl.")
 	}
