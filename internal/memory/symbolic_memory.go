@@ -7,7 +7,14 @@ import (
 
 type Memory interface {
 	// Params
+	Param(tp symbolic.ExpressionType) *symbolic.Ref
 	ParamPrimitiveArray(baseType symbolic.ExpressionType) *symbolic.Ref
+	ParamComplexArray(baseType symbolic.ExpressionType) *symbolic.Ref
+
+	// Primitives
+	Allocate(tp symbolic.ExpressionType) *symbolic.Ref
+	AssignValue(ref *symbolic.Ref, value symbolic.SymbolicExpression)
+	GetValue(ref *symbolic.Ref) symbolic.SymbolicExpression
 
 	// Arrays
 	AllocatePrimitiveArray(baseType symbolic.ExpressionType) *symbolic.Ref
@@ -18,9 +25,6 @@ type Memory interface {
 	// Aliasing constraints
 	Constraints() []symbolic.SymbolicExpression
 }
-
-type SymId symbolic.SymbolicExpression
-type Type int
 
 type SymbolicMemory struct {
 	// Internals
@@ -50,11 +54,62 @@ func NewSymbolicMemory() *SymbolicMemory {
 	}
 }
 
+func (mem *SymbolicMemory) Param(tp symbolic.ExpressionType) *symbolic.Ref {
+	r := symbolic.NewRef(mem.nextId(), tp)
+	mem.Params = append(mem.Params, r)
+
+	return r
+}
+
 func (mem *SymbolicMemory) ParamPrimitiveArray(baseType symbolic.ExpressionType) *symbolic.Ref {
 	r := symbolic.NewArrayRef(mem.nextId(), 0, baseType)
 	mem.Params = append(mem.Params, r)
 
 	return r
+}
+
+func (mem *SymbolicMemory) ParamComplexArray(dimension int, baseType symbolic.ExpressionType) *symbolic.Ref {
+	r := symbolic.NewArrayRef(mem.nextId(), dimension, baseType)
+	mem.Params = append(mem.Params, r)
+
+	return r
+}
+
+func (mem *SymbolicMemory) Allocate(tp symbolic.ExpressionType) *symbolic.Ref {
+	r := symbolic.NewRef(mem.nextId(), tp)
+	mem.Allocations = append(mem.Allocations, r)
+
+	return r
+}
+
+func (mem *SymbolicMemory) AssignValue(ref *symbolic.Ref, value symbolic.SymbolicExpression) {
+	refKey := ref.Idx
+
+	switch ref.RefType {
+	case symbolic.IntType:
+		mem.IntSegment.Store(refKey, value)
+	case symbolic.BoolType:
+		mem.BoolSegment.Store(refKey, value)
+	case symbolic.StringType:
+		mem.StringSegment.Store(refKey, value)
+	default:
+		panic("unknown ref type")
+	}
+}
+
+func (mem *SymbolicMemory) GetValue(ref *symbolic.Ref) symbolic.SymbolicExpression {
+	refKey := ref.Idx
+
+	switch ref.RefType {
+	case symbolic.IntType:
+		return mem.IntSegment.Access(refKey)
+	case symbolic.BoolType:
+		return mem.BoolSegment.Access(refKey)
+	case symbolic.StringType:
+		return mem.StringSegment.Access(refKey)
+	default:
+		panic("unknown base type")
+	}
 }
 
 func (mem *SymbolicMemory) AllocatePrimitiveArray(baseType symbolic.ExpressionType) *symbolic.Ref {
@@ -131,8 +186,6 @@ func (mem *SymbolicMemory) GetFromArray(ref *symbolic.Ref, index symbolic.Symbol
 	default:
 		panic("unknown base type")
 	}
-
-	panic("Unreachable")
 }
 
 func (mem *SymbolicMemory) Constraints() []symbolic.SymbolicExpression {

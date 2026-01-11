@@ -95,8 +95,8 @@ func main() {
 		}
 	})
 
-	// 2) SAT: bool[][] aliasing
-	runTest("2) SAT: bool[][] aliasing", func(tr *translator.Z3Translator) {
+	// 3) SAT: bool[][] aliasing
+	runTest("3) SAT: bool[][] aliasing", func(tr *translator.Z3Translator) {
 		mem := memory.NewSymbolicMemory()
 
 		// bool[][]
@@ -136,6 +136,76 @@ func main() {
 		fmt.Println(tr.SolverToString())
 
 		if m := mustSat(tr); m == nil {
+			panic("")
+		}
+	})
+
+	// 4) UNSAT: int prevent aliasing
+	runTest("4) UNSAT: int prevent aliasing", func(tr *translator.Z3Translator) {
+		mem := memory.NewSymbolicMemory()
+
+		foo1 := mem.Allocate(symbolic.IntType)
+		foo2 := mem.Allocate(symbolic.IntType)
+
+		// Присваиваем конкретные символические значения
+		mem.AssignValue(foo2, symbolic.NewIntConstant(5))
+		mem.AssignValue(foo1, symbolic.NewIntConstant(2))
+
+		// Получаем символьное выражение "значение по foo2"
+		valFoo2 := mem.GetValue(foo2)
+
+		// Строим условие valFoo2 == 5 (SAT)
+		cond := symbolic.NewBinaryOperation(
+			valFoo2,
+			symbolic.NewIntConstant(2),
+			symbolic.EQ,
+		)
+
+		tr.AssertExpr(cond)
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
+
+		fmt.Println("== Z3 formula dump (int) ==")
+		fmt.Println(tr.SolverToString())
+
+		if m := mustSat(tr); m != nil {
+			panic("")
+		}
+	})
+
+	// 5) SAT: int aliasing
+	runTest("5) SAT: int aliasing", func(tr *translator.Z3Translator) {
+		mem := memory.NewSymbolicMemory()
+
+		foo1 := mem.Param(symbolic.IntType)
+		foo2 := mem.Param(symbolic.IntType)
+
+		// Присваиваем конкретные символические значения
+		mem.AssignValue(foo2, symbolic.NewIntConstant(5))
+		mem.AssignValue(foo1, symbolic.NewIntConstant(2))
+
+		// Получаем символьное выражение "значение по foo2"
+		valFoo2 := mem.GetValue(foo2)
+
+		// Строим условие valFoo2 == 2 (SAT)
+		cond := symbolic.NewBinaryOperation(
+			valFoo2,
+			symbolic.NewIntConstant(2),
+			symbolic.EQ,
+		)
+
+		tr.AssertExpr(cond)
+		for _, c := range mem.Constraints() {
+			tr.AssertExpr(c)
+		}
+
+		fmt.Println("== Z3 formula dump (int) ==")
+		fmt.Println(tr.SolverToString())
+
+		if m := mustSat(tr); m != nil {
+			fmt.Printf("Model:\n%s\n", m.String())
+		} else {
 			panic("")
 		}
 	})
