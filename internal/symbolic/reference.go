@@ -7,9 +7,10 @@ type Ref struct {
 	RefType ExpressionType
 
 	// ArrayRef info
-	// В случае ссылки на массив, надо хранить косвенность и Primitive BaseType
-	ArrayDim      int // Dimension
-	ArrayBaseType ExpressionType
+	ArrayDimension int
+	ArrayBaseType  ExpressionType
+
+	// StructRef info
 }
 
 func NewRef(idx int64, refType ExpressionType) *Ref {
@@ -23,8 +24,8 @@ func NewArrayRef(idx int64, dimension int, baseType ExpressionType) *Ref {
 		Idx:     NewSymbolicVariable(fmt.Sprintf("addr_%d", idx), IntType),
 		RefType: ArrayType,
 
-		ArrayDim:      dimension,
-		ArrayBaseType: baseType,
+		ArrayDimension: dimension,
+		ArrayBaseType:  baseType,
 	}
 }
 

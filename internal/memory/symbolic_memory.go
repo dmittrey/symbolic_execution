@@ -133,7 +133,7 @@ func (mem *SymbolicMemory) AssignToArray(ref *symbolic.Ref, index symbolic.Symbo
 
 	// 1) Взять id у ref
 	refKey := ref.Idx
-	refDim := ref.ArrayDim
+	refDim := ref.ArrayDimension
 
 	// 2) Раскручиваем косвенность через ArraySegment
 	// Bool[]   - 1
@@ -164,7 +164,7 @@ func (mem *SymbolicMemory) GetFromArray(ref *symbolic.Ref, index symbolic.Symbol
 
 	// 1) Взять id у ref
 	refKey := ref.Idx
-	refDim := ref.ArrayDim
+	refDim := ref.ArrayDimension
 
 	// 2) Раскручиваем косвенность через ArraySegment
 	// Bool[]   - 1
