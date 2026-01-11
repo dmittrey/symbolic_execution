@@ -53,20 +53,13 @@ type SymbolicExpression interface {
 }
 
 // Многомерный массив
-type TensorExpression interface {
+type ArrayExpression interface {
 	SymbolicExpression
 
 	// Ops
-	Access(idx SymbolicExpression) SymbolicExpression
+	Access(idx SymbolicExpression)
+	Store(idx SymbolicExpression, val SymbolicExpression)
 
 	// Underlying Type
-	BaseType() ExpressionType
-}
-
-// Одномерный массив - частный случай тензора
-type VectorExpression interface {
-	TensorExpression
-
-	// Ops
-	Store(idx SymbolicExpression, val SymbolicExpression)
+	// BaseType() ExpressionType
 }

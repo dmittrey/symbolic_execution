@@ -11,7 +11,5 @@ type Visitor interface {
 	VisitStringConstant(*StringConstant) interface{}
 
 	// Arrays
-	VisitVector(expr *Vector) interface{}
-	VisitTensor(expr *Tensor) interface{}
-	VisitTensorAccess(expr *TensorAccess) interface{}
+	VisitArray(expr *Array) interface{}
 }
