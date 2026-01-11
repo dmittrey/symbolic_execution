@@ -31,7 +31,7 @@ func NewArray(name string, valType ExpressionType) *Array {
 
 // SymbolicExpression
 
-func (t *Array) Type() ExpressionType { return TensorType }
+func (t *Array) Type() ExpressionType { return ArrayType }
 
 func (t *Array) ExprName() string { return t.Name }
 
