@@ -7,9 +7,11 @@ type Visitor interface {
 	VisitBoolConstant(expr *BoolConstant) interface{}
 	VisitBinaryOperation(expr *BinaryOperation) interface{}
 	VisitUnaryOperation(expr *UnaryOperation) interface{}
-	VisitFunctionCall(expr *FunctionCall) interface{}
 	VisitConditionalExpression(expr *ConditionalExpression) interface{}
-	VisitArray(expr *Array) interface{}
-	VisitArrayAccess(expr *ArrayAccess) interface{}
 	VisitStringConstant(*StringConstant) interface{}
+
+	// Arrays
+	VisitVector(expr *Vector) interface{}
+	VisitTensor(expr *Tensor) interface{}
+	VisitTensorAccess(expr *TensorAccess) interface{}
 }
