@@ -11,8 +11,7 @@ const (
 	RefType
 
 	// Arrays
-	VectorType
-	TensorType
+	ArrayType
 )
 
 // String возвращает строковое представление типа
