@@ -4,45 +4,32 @@ import "fmt"
 
 type Ref struct {
 	Idx     SymbolicExpression
-	OwnType ExpressionType
 	RefType ExpressionType
 
-	// array refs
-	ElemType ExpressionType
-
-	// struct refs
-	StructTypeIdx     int // какой именно struct type
-	ElemStructTypeIdx int // если RefType==ArrayType && ElemType==StructType
+	// ArrayRef info
+	// В случае ссылки на массив, надо хранить косвенность и Primitive BaseType
+	ArrayDim      int // Dimension
+	ArrayBaseType ExpressionType
 }
 
 func NewRef(idx int64, refType ExpressionType) *Ref {
 	return &Ref{
 		Idx:     NewSymbolicVariable(fmt.Sprintf("addr_%d", idx), IntType),
-		OwnType: RefType,
 		RefType: refType,
-
-		ElemType:          -1,
-		StructTypeIdx:     -1,
-		ElemStructTypeIdx: -1,
 	}
 }
-func NewRefExpr(idx SymbolicExpression, refType ExpressionType) *Ref {
-	if idx == nil || idx.Type() != IntType {
-		panic(fmt.Sprintf("NewRefExpr: idx must be int expression, got %T (%v)", idx, idx))
-	}
+func NewArrayRef(idx int64, dimension int, baseType ExpressionType) *Ref {
 	return &Ref{
-		Idx:     idx,
-		OwnType: RefType,
-		RefType: refType,
+		Idx:     NewSymbolicVariable(fmt.Sprintf("addr_%d", idx), IntType),
+		RefType: ArrayType,
 
-		ElemType:          -1,
-		StructTypeIdx:     -1,
-		ElemStructTypeIdx: -1,
+		ArrayDim:      dimension,
+		ArrayBaseType: baseType,
 	}
 }
 
 func (r *Ref) Type() ExpressionType {
-	return r.OwnType
+	return RefType
 }
 
 func (r *Ref) String() string {

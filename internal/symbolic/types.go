@@ -54,9 +54,10 @@ type ArrayExpression interface {
 	SymbolicExpression
 
 	// Ops
-	Access(idx SymbolicExpression)
+	Access(idx SymbolicExpression) SymbolicExpression
 	Store(idx SymbolicExpression, val SymbolicExpression)
 
-	// Underlying Type
-	// BaseType() ExpressionType
+	// Info
+	Dimension() int
+	BaseType() ExpressionType
 }

@@ -1,6 +1,9 @@
 package symbolic
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 type ArrayOp int
 
@@ -12,20 +15,22 @@ const (
 type Op struct {
 	Kind ArrayOp
 	Idx  SymbolicExpression
-	Val  SymbolicExpression // только для store; для select = nil
+	Val  SymbolicExpression // store: значение; select: переменная-результат
 }
 
 type Array struct {
-	Name string
+	Name     string
+	ElemType ExpressionType
 
 	// ops — последовательность операций (store/select)
 	Ops []Op
 }
 
-func NewArray(name string, valType ExpressionType) *Array {
-	return &Array{
-		Name: name,
-		Ops:  make([]Op, 0),
+func NewArray(name string, elemType ExpressionType) Array {
+	return Array{
+		Name:     name,
+		ElemType: elemType,
+		Ops:      make([]Op, 0),
 	}
 }
 
@@ -51,6 +56,8 @@ func (t *Array) String() string {
 		case OpSelect:
 			b.WriteString(".select(")
 			b.WriteString(op.Idx.String())
+			b.WriteString(", ")
+			b.WriteString(op.Val.String())
 			b.WriteByte(')')
 
 		default:
@@ -67,10 +74,12 @@ func (t *Array) Accept(visitor Visitor) interface{} {
 
 // ArrayExpression
 
-func (t *Array) Access(idx SymbolicExpression) {
-	t.Ops = append(t.Ops, Op{Kind: OpSelect, Idx: idx})
+func (a *Array) Access(idx SymbolicExpression) SymbolicExpression {
+	res := NewSymbolicVariable(fmt.Sprintf("%s[%s]", a.Name, idx.String()), a.ElemType)
+	a.Ops = append(a.Ops, Op{Kind: OpSelect, Idx: idx, Val: res})
+	return res
 }
 
-func (t *Array) Store(idx, val SymbolicExpression) {
-	t.Ops = append(t.Ops, Op{Kind: OpStore, Idx: idx, Val: val})
+func (a *Array) Store(idx, val SymbolicExpression) {
+	a.Ops = append(a.Ops, Op{Kind: OpStore, Idx: idx, Val: val})
 }
