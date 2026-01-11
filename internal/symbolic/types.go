@@ -12,6 +12,9 @@ const (
 
 	// Arrays
 	ArrayType
+
+	// Forbid type
+	NONE
 )
 
 // String возвращает строковое представление типа

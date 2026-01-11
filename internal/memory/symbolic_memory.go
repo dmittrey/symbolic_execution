@@ -2,14 +2,17 @@ package memory
 
 import (
 	"fmt"
+	"strconv"
 	"symbolic-execution-course/internal/symbolic"
 )
 
 type Memory interface {
 	// Params
 	Param(tp symbolic.ExpressionType) *symbolic.Ref
+	ParamStruct(structTypeName string, fieldTypes []symbolic.ExpressionType) *symbolic.Ref
 	ParamPrimitiveArray(baseType symbolic.ExpressionType) *symbolic.Ref
 	ParamComplexArray(baseType symbolic.ExpressionType) *symbolic.Ref
+	ParamStructsArray(dimension int, structName string, fieldTypes []symbolic.ExpressionType) *symbolic.Ref
 
 	// Primitives
 	Allocate(tp symbolic.ExpressionType) *symbolic.Ref
@@ -19,8 +22,13 @@ type Memory interface {
 	// Arrays
 	AllocatePrimitiveArray(baseType symbolic.ExpressionType) *symbolic.Ref
 	AllocateComplexArray(dimension int, baseType symbolic.ExpressionType) *symbolic.Ref
+	AllocateStructsArray(dimension int, structName string, fieldTypes []symbolic.ExpressionType) *symbolic.Ref
 	AssignToArray(ref *symbolic.Ref, index symbolic.SymbolicExpression, value symbolic.SymbolicExpression)
 	GetFromArray(ref *symbolic.Ref, index symbolic.SymbolicExpression) symbolic.SymbolicExpression
+
+	// Struct
+	AllocateStruct(structTypeName string, fieldTypes []symbolic.ExpressionType) *symbolic.Ref
+	FieldAddress(ref *symbolic.Ref, fieldIdx int) *symbolic.Ref
 
 	// Aliasing constraints
 	Constraints() []symbolic.SymbolicExpression
@@ -28,7 +36,8 @@ type Memory interface {
 
 type SymbolicMemory struct {
 	// Internals
-	LastIdx int
+	LastRefIdx int
+
 	// Aliasing
 	Params      []*symbolic.Ref
 	Allocations []*symbolic.Ref
@@ -40,22 +49,40 @@ type SymbolicMemory struct {
 
 	// Array
 	ArraySegment symbolic.Array //SymId -> SymId
+
+	// Struct
+	StructSegments map[string]map[int]*symbolic.Array
 }
 
 func NewSymbolicMemory() *SymbolicMemory {
 	return &SymbolicMemory{
-		LastIdx: 0,
+		LastRefIdx: 0,
+
+		Params:      make([]*symbolic.Ref, 0),
+		Allocations: make([]*symbolic.Ref, 0),
 
 		IntSegment:    symbolic.NewArray("IntSegment", symbolic.IntType),
 		BoolSegment:   symbolic.NewArray("BoolSegment", symbolic.BoolType),
 		StringSegment: symbolic.NewArray("StringSegment", symbolic.StringType),
 
 		ArraySegment: symbolic.NewArray("ArraySegment", symbolic.IntType),
+
+		StructSegments: make(map[string]map[int]*symbolic.Array),
 	}
 }
 
 func (mem *SymbolicMemory) Param(tp symbolic.ExpressionType) *symbolic.Ref {
 	r := symbolic.NewRef(mem.nextId(), tp)
+	mem.Params = append(mem.Params, r)
+
+	return r
+}
+
+func (mem *SymbolicMemory) ParamStruct(structTypeName string, fieldTypes []symbolic.ExpressionType) *symbolic.Ref {
+	mem.registerStructType(structTypeName, fieldTypes)
+
+	r := symbolic.NewRef(mem.nextId(), symbolic.StructType)
+	r.StructTypeName = structTypeName
 	mem.Params = append(mem.Params, r)
 
 	return r
@@ -70,6 +97,16 @@ func (mem *SymbolicMemory) ParamPrimitiveArray(baseType symbolic.ExpressionType)
 
 func (mem *SymbolicMemory) ParamComplexArray(dimension int, baseType symbolic.ExpressionType) *symbolic.Ref {
 	r := symbolic.NewArrayRef(mem.nextId(), dimension, baseType)
+	mem.Params = append(mem.Params, r)
+
+	return r
+}
+
+func (mem *SymbolicMemory) ParamStructsArray(dimension int, structTypeName string, fieldTypes []symbolic.ExpressionType) *symbolic.Ref {
+	mem.registerStructType(structTypeName, fieldTypes)
+
+	r := symbolic.NewArrayRef(mem.nextId(), dimension, symbolic.StructType)
+	r.StructTypeName = structTypeName
 	mem.Params = append(mem.Params, r)
 
 	return r
@@ -92,6 +129,8 @@ func (mem *SymbolicMemory) AssignValue(ref *symbolic.Ref, value symbolic.Symboli
 		mem.BoolSegment.Store(refKey, value)
 	case symbolic.StringType:
 		mem.StringSegment.Store(refKey, value)
+	case symbolic.StructType:
+		(mem.StructSegments[ref.StructTypeName][ref.StructFieldIdx]).Store(refKey, value)
 	default:
 		panic("unknown ref type")
 	}
@@ -107,6 +146,8 @@ func (mem *SymbolicMemory) GetValue(ref *symbolic.Ref) symbolic.SymbolicExpressi
 		return mem.BoolSegment.Access(refKey)
 	case symbolic.StringType:
 		return mem.StringSegment.Access(refKey)
+	case symbolic.StructType:
+		return (mem.StructSegments[ref.StructTypeName][ref.StructFieldIdx]).Access(refKey)
 	default:
 		panic("unknown base type")
 	}
@@ -126,32 +167,52 @@ func (mem *SymbolicMemory) AllocateComplexArray(dimension int, baseType symbolic
 	return r
 }
 
+func (mem *SymbolicMemory) AllocateStructsArray(dimension int, structTypeName string, fieldTypes []symbolic.ExpressionType) *symbolic.Ref {
+	// Prepare memory internals
+	mem.registerStructType(structTypeName, fieldTypes)
+
+	r := symbolic.NewArrayRef(mem.nextId(), dimension, symbolic.StructType)
+	r.StructTypeName = structTypeName
+	mem.Allocations = append(mem.Allocations, r)
+
+	return r
+}
+
 func (mem *SymbolicMemory) AssignToArray(ref *symbolic.Ref, index symbolic.SymbolicExpression, value symbolic.SymbolicExpression) {
 	if ref.RefType != symbolic.ArrayType {
 		panic(fmt.Sprintf("%s %s", ref.RefType, symbolic.ArrayType))
 	}
 
-	// 1) Взять id у ref
-	refKey := ref.Idx
-	refDim := ref.ArrayDimension
+	slotAddr := mem.effAddr(ref.Idx, index)
 
-	// 2) Раскручиваем косвенность через ArraySegment
-	// Bool[]   - 1
-	// Bool[][] - 2
-	for refDim != 0 {
-		refKey = mem.ArraySegment.Access(refKey)
-		refDim--
+	// Если не последнее измерение, то ref[index] — это handle (адрес) подмассива.
+	if ref.ArrayDimension > 0 {
+		// Разрешим 2 формы:
+		// 1) value — это *Ref на массив (пишем его Idx как адрес)
+		if vref, ok := value.(*symbolic.Ref); ok {
+			if vref.RefType != symbolic.ArrayType {
+				panic("AssignToArray: expected array ref as value for non-last dimension")
+			}
+			mem.ArraySegment.Store(slotAddr, vref.Idx)
+			return
+		}
+
+		// 2) или value — сразу символьный адрес (BV), если ты так моделируешь handle
+		// (оставь, если тебе это нужно; иначе лучше panic)
+		mem.ArraySegment.Store(slotAddr, value)
+		return
 	}
 
-	// 3) Пойти в нужный сегмент, получить значение по адресу
-	addr := mem.effAddr(refKey, index)
+	// Последнее измерение — пишем скаляр
 	switch ref.ArrayBaseType {
 	case symbolic.IntType:
-		mem.IntSegment.Store(addr, value)
+		mem.IntSegment.Store(slotAddr, value)
 	case symbolic.BoolType:
-		mem.BoolSegment.Store(addr, value)
+		mem.BoolSegment.Store(slotAddr, value)
 	case symbolic.StringType:
-		mem.StringSegment.Store(addr, value)
+		mem.StringSegment.Store(slotAddr, value)
+	case symbolic.StructType:
+		panic("AssignToArray: assigning whole struct is not supported; assign fields instead")
 	default:
 		panic("unknown base type")
 	}
@@ -162,30 +223,45 @@ func (mem *SymbolicMemory) GetFromArray(ref *symbolic.Ref, index symbolic.Symbol
 		panic(fmt.Sprintf("%s %s", ref.RefType, symbolic.ArrayType))
 	}
 
-	// 1) Взять id у ref
-	refKey := ref.Idx
-	refDim := ref.ArrayDimension
+	slotAddr := mem.effAddr(ref.Idx, index)
 
-	// 2) Раскручиваем косвенность через ArraySegment
-	// Bool[]   - 1
-	// Bool[][] - 2
-	for refDim != 0 {
-		refKey = mem.ArraySegment.Access(refKey)
-		refDim--
+	// Если это ещё НЕ последнее измерение — возвращаем handle подмассива
+	if ref.ArrayDimension > 0 {
+		childBase := mem.ArraySegment.Access(slotAddr)
+		r := symbolic.NewArrayRefFromExpr(childBase, ref.ArrayDimension-1, ref.ArrayBaseType)
+		// если массив структур — протащим тип
+		r.StructTypeName = ref.StructTypeName
+		return r
 	}
 
-	// 3) Пойти в нужный сегмент, получить значение по адресу
-	addr := mem.effAddr(refKey, index)
+	// Последнее измерение — читаем скаляр
 	switch ref.ArrayBaseType {
 	case symbolic.IntType:
-		return mem.IntSegment.Access(addr)
+		return mem.IntSegment.Access(slotAddr)
 	case symbolic.BoolType:
-		return mem.BoolSegment.Access(addr)
+		return mem.BoolSegment.Access(slotAddr)
 	case symbolic.StringType:
-		return mem.StringSegment.Access(addr)
+		return mem.StringSegment.Access(slotAddr)
+	case symbolic.StructType:
+		// Потом в FieldAddress доуточним
+		objAddr := mem.ArraySegment.Access(slotAddr) // BV address of struct object
+		return &symbolic.Ref{
+			Idx:            objAddr,
+			RefType:        symbolic.StructType,
+			StructTypeName: ref.StructTypeName,
+		}
 	default:
 		panic("unknown base type")
 	}
+}
+
+func (mem *SymbolicMemory) FieldAddress(ref *symbolic.Ref, fieldIdx int) *symbolic.Ref {
+	if mem.StructSegments[ref.StructTypeName] == nil {
+		panic("Not found type in indexing types")
+	}
+
+	ref.StructFieldIdx = fieldIdx
+	return ref
 }
 
 func (mem *SymbolicMemory) Constraints() []symbolic.SymbolicExpression {
@@ -211,12 +287,18 @@ func (mem *SymbolicMemory) Constraints() []symbolic.SymbolicExpression {
 }
 
 func (mem *SymbolicMemory) segmentConstraints() []symbolic.SymbolicExpression {
-	return []symbolic.SymbolicExpression{
+	out := []symbolic.SymbolicExpression{
 		&mem.IntSegment,
 		&mem.BoolSegment,
 		&mem.StringSegment,
 		&mem.ArraySegment,
 	}
+	for _, fields := range mem.StructSegments {
+		for _, seg := range fields {
+			out = append(out, seg) // seg is *symbolic.Array
+		}
+	}
+	return out
 }
 
 func (mem *SymbolicMemory) effAddr(base symbolic.SymbolicExpression, index symbolic.SymbolicExpression) symbolic.SymbolicExpression {
@@ -225,6 +307,19 @@ func (mem *SymbolicMemory) effAddr(base symbolic.SymbolicExpression, index symbo
 }
 
 func (mem *SymbolicMemory) nextId() int64 {
-	mem.LastIdx++
-	return int64(mem.LastIdx - 1)
+	mem.LastRefIdx++
+	return int64(mem.LastRefIdx - 1)
+}
+
+func (mem *SymbolicMemory) registerStructType(structTypeName string, fieldTypes []symbolic.ExpressionType) {
+	// already registered => do nothing
+	if mem.StructSegments[structTypeName] != nil {
+		return
+	}
+
+	mem.StructSegments[structTypeName] = make(map[int]*symbolic.Array)
+	for idx, ft := range fieldTypes {
+		arr := symbolic.NewArray(fmt.Sprintf("%s_%s", structTypeName, strconv.Itoa(idx)), ft)
+		mem.StructSegments[structTypeName][idx] = &arr
+	}
 }
