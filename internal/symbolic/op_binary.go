@@ -24,11 +24,7 @@ func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *Bina
 		(op == EQ || op == NE):
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 
-	case lt == TensorType && rt == TensorType &&
-		(op == EQ || op == NE):
-		return &BinaryOperation{Left: left, Right: right, Operator: op}
-
-	case lt == VectorType && rt == VectorType &&
+	case lt == ArrayType && rt == ArrayType &&
 		(op == EQ || op == NE):
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 

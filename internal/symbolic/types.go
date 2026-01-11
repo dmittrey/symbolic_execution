@@ -27,10 +27,8 @@ func (et ExpressionType) String() string {
 		return "struct"
 	case RefType:
 		return "ref"
-	case VectorType:
-		return "vector"
-	case TensorType:
-		return "tensor"
+	case ArrayType:
+		return "array"
 	default:
 		return "unknown"
 	}
