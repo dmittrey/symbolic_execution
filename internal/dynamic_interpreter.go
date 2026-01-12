@@ -26,7 +26,6 @@ type LValue struct {
 	Index symbolic.SymbolicExpression // только для ArrayElem
 	Field int                         // только для StructField
 
-	// опционально: SSA тип для нормализации/диагностики
 	SsaType types.Type
 }
 
@@ -38,9 +37,7 @@ type Interpreter struct {
 	Heap          memory.Memory
 	Env           map[ssa.Value]symbolic.SymbolicExpression
 
-	// built-in len
 	LenCache map[string]symbolic.SymbolicExpression
-
 	paramRef map[ssa.Value]*symbolic.Ref
 }
 
@@ -53,7 +50,6 @@ func NewInterpreter(analyser *Analyser, pathCond symbolic.SymbolicExpression) In
 		Env:           make(map[ssa.Value]symbolic.SymbolicExpression),
 
 		LenCache: make(map[string]symbolic.SymbolicExpression),
-
 		paramRef: make(map[ssa.Value]*symbolic.Ref),
 	}
 }
@@ -150,7 +146,7 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 	case *ssa.BinOp, *ssa.UnOp,
 		*ssa.FieldAddr, *ssa.IndexAddr,
 		*ssa.Slice, *ssa.MakeSlice, *ssa.Alloc,
-		*ssa.Convert, *ssa.Call:
+		*ssa.Convert:
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 
 	default:
@@ -195,7 +191,7 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 
 		// struct / *struct  => address to struct
 		if typeName, fields, ok := structMeta(v.Type()); ok {
-			r := interpreter.Heap.AllocateStruct(typeName, fields, true) // isAliasing=true for params
+			r := interpreter.Heap.AllocateStruct(typeName, fields, true)
 			interpreter.paramRef[v] = r
 			return r
 		}
@@ -264,7 +260,6 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 			return r
 		}
 
-		// pointer alloc: *T
 		if p, ok := v.Type().Underlying().(*types.Pointer); ok {
 			if typeName, fields, ok2 := structMeta(p.Elem()); ok2 {
 				r := interpreter.Heap.AllocateStruct(typeName, fields, false)
@@ -277,15 +272,11 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 			return r
 		}
 
-		// primitive
 		ty := goTypeToSym(v.Type())
 		r := interpreter.Heap.Allocate(ty, false)
 		interpreter.Env[v] = r
 		return r
 
-	/*
-		Slice(X[low:high]) — пока хак: просто возвращаем X
-	*/
 	case *ssa.Slice:
 		res := interpreter.resolveExpression(v.X)
 		interpreter.Env[v] = res
@@ -295,7 +286,6 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		src := interpreter.resolveExpression(v.X)
 		dstTy := goTypeToSym(v.Type())
 
-		// (byte/rune/int32/uint8/...) => IntType,
 		if src.Type() == dstTy {
 			interpreter.Env[v] = src
 			return src
@@ -325,7 +315,6 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		interpreter.Env[v] = r
 		return r
 
-	// Константы
 	case *ssa.Const:
 		if v.Value == nil {
 			return interpreter.nilForType(v.Type())
@@ -334,29 +323,24 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		switch v.Value.Kind() {
 		case constant.Bool:
 			return symbolic.NewBoolConstant(constant.BoolVal(v.Value))
-
 		case constant.Int:
 			i, ok := constant.Int64Val(v.Value)
 			if !ok {
 				panic(fmt.Sprintf("big int const not supported: %s", v.Value.String()))
 			}
 			return symbolic.NewIntConstant(i)
-
 		case constant.String:
 			return symbolic.NewStringConstant(constant.StringVal(v.Value))
-
 		case constant.Float:
 			f, ok := constant.Float64Val(v.Value)
 			if !ok {
 				panic(fmt.Sprintf("float const not supported: %s", v.Value.String()))
 			}
 			return symbolic.NewFloatConstant(f)
-
 		default:
 			panic(fmt.Sprintf("unsupported const kind: %v", v.Value.Kind()))
 		}
 
-	// X Op Y
 	case *ssa.BinOp:
 		l := interpreter.resolveExpression(v.X)
 		r := interpreter.resolveExpression(v.Y)
@@ -365,12 +349,9 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 			return symbolic.NewBinaryOperation(l, r, sop)
 		}
 
-		// fallback
 		return symbolic.NewSymbolicVariable(v.Name(), goTypeToSym(v.Type()))
 
-	// Op X
 	case *ssa.UnOp:
-		// special-case load: *X
 		if v.Op == token.MUL {
 			lv := interpreter.resolveAddr(v.X)
 			return interpreter.load(lv)
@@ -385,20 +366,17 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		return symbolic.NewSymbolicVariable(v.Name(), goTypeToSym(v.Type()))
 
 	case *ssa.Call:
-		// builtin len(...) stub
 		if b, ok := v.Call.Value.(*ssa.Builtin); ok && b.Name() == "len" {
 			if len(v.Call.Args) != 1 {
 				panic("len(): unexpected args count")
 			}
 
 			arg := v.Call.Args[0]
-
-			// (опционально, но полезно) len(nil) = 0
 			if c, ok := arg.(*ssa.Const); ok && c.Value == nil {
 				return symbolic.NewIntConstant(0)
 			}
 
-			key := "len@" + arg.String() // достаточно стабильно
+			key := "len@" + arg.String()
 			if cached, ok := interpreter.LenCache[key]; ok {
 				interpreter.Env[v] = cached
 				return cached
@@ -489,7 +467,7 @@ func goTypeToSym(t types.Type) symbolic.ExpressionType {
 		case tt.Info()&types.IsString != 0:
 			return symbolic.StringType
 		case tt.Info()&types.IsFloat != 0:
-			return symbolic.FloatType // если ты уже добавил FloatType
+			return symbolic.FloatType
 		}
 
 	case *types.Pointer:
@@ -502,7 +480,6 @@ func goTypeToSym(t types.Type) symbolic.ExpressionType {
 		return goTypeToSym(tt.Elem())
 
 	case *types.Slice:
-		// ключевой фикс: [][]int -> []int -> int
 		return goTypeToSym(tt.Elem())
 
 	default:
@@ -627,7 +604,6 @@ func (it *Interpreter) resolveAddr(v ssa.Value) LValue {
 			panic("Index must be int")
 		}
 
-		// ВОТ ТУТ — единственная нормализация по SSA типу:
 		br = it.normalizeIndexBaseToArrayRef(a.X, br)
 
 		return LValue{Kind: LVArrayElem, Base: br, Index: idx, SsaType: a.Type()}
@@ -650,7 +626,7 @@ func (it *Interpreter) load(lv LValue) symbolic.SymbolicExpression {
 
 	case LVStructField:
 		fr := it.Heap.StructFieldAddr(lv.Base, lv.Field)
-		raw := it.Heap.GetValue(fr) // what is stored in field segment
+		raw := it.Heap.GetValue(fr)
 
 		// FieldAddr has type "*T", but we need T
 		ft := lv.SsaType
@@ -705,8 +681,6 @@ func (it *Interpreter) load(lv LValue) symbolic.SymbolicExpression {
 	case LVArrayElem:
 		eref := it.Heap.ArrayElemAddr(lv.Base, lv.Index)
 
-		// IMPORTANT: element is a struct => value is a struct-ref (whole object),
-		// calling GetValue would panic ("can't read whole struct")
 		if eref.RefType == symbolic.StructType && eref.StructFieldIdx == -1 {
 			return eref
 		}
@@ -743,7 +717,6 @@ func (it *Interpreter) normalizeIndexBaseToArrayRef(x ssa.Value, br *symbolic.Re
 	if br == nil {
 		panic("normalizeIndexBaseToArrayRef: nil base ref")
 	}
-	// already OK
 	if br.RefType == symbolic.ArrayType {
 		return br
 	}
