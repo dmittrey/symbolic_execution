@@ -19,18 +19,15 @@ type Translator interface {
 
 // ExpressionTranslator базовый интерфейс для трансляции выражений
 type ExpressionTranslator interface {
-	// Visit методы для различных типов выражений
 	VisitVariable(expr *symbolic.SymbolicVariable) (interface{}, error)
 	VisitIntConstant(expr *symbolic.IntConstant) (interface{}, error)
 	VisitBoolConstant(expr *symbolic.BoolConstant) (interface{}, error)
+	VisitStringConstant(expr *symbolic.StringConstant) (interface{}, error)
+	VisitFloatConstant(expr *symbolic.FloatConstant) (interface{}, error)
 	VisitBinaryOperation(expr *symbolic.BinaryOperation) (interface{}, error)
 	VisitUnaryOperation(expr *symbolic.UnaryOperation) (interface{}, error)
 	VisitConditionalExpression(expr *symbolic.ConditionalExpression) (interface{}, error)
-	VisitStringConstant(expr *symbolic.StringConstant) (interface{}, error)
-	VisitFloatConstant(expr *symbolic.FloatConstant) (interface{}, error)
 	VisitRef(r *symbolic.Ref) (interface{}, error)
-
-	// Arrays
 	VisitArray(expr *symbolic.Array) (interface{}, error)
 }
 

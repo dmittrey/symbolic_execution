@@ -4,18 +4,26 @@ package symbolic
 type ExpressionType int
 
 const (
+	// Primitives
 	IntType ExpressionType = iota
 	BoolType
 	StringType
 	FloatType
-	StructType
+
+	// Reference
 	RefType
+
+	// Struct
+	StructType
 
 	// Arrays
 	ArrayType
 
-	// Forbid type
-	NONE
+	// Nil
+	NilType
+
+	// Not initialized
+	ForbiddenType
 )
 
 // String возвращает строковое представление типа
@@ -29,12 +37,16 @@ func (et ExpressionType) String() string {
 		return "string"
 	case FloatType:
 		return "float"
-	case StructType:
-		return "struct"
 	case RefType:
 		return "ref"
+	case StructType:
+		return "struct"
 	case ArrayType:
 		return "array"
+	case NilType:
+		return "Nil"
+	case ForbiddenType:
+		return "FORBID"
 	default:
 		return "unknown"
 	}
@@ -62,8 +74,4 @@ type ArrayExpression interface {
 	// Ops
 	Access(idx SymbolicExpression) SymbolicExpression
 	Store(idx SymbolicExpression, val SymbolicExpression)
-
-	// Info
-	Dimension() int
-	BaseType() ExpressionType
 }

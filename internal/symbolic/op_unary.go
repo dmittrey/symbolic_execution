@@ -16,6 +16,9 @@ func NewUnaryOperation(operand SymbolicExpression, operator UnaryOperator) *Unar
 	case operand.Type() == BoolType && operator == NOT:
 		return &UnaryOperation{Operand: operand, Operator: operator}
 
+	case operand.Type() == FloatType && operator == NEG:
+		return &UnaryOperation{Operand: operand, Operator: operator}
+
 	default:
 		panic(fmt.Errorf("unary op %s not supported for %s(%s)", operator.String(), operand.String(), operand.Type().String()))
 	}

@@ -13,7 +13,7 @@ func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *Bina
 	lt, rt := left.Type(), right.Type()
 
 	switch {
-	case lt == IntType && rt == IntType && (op != IMPLIES):
+	case lt == IntType && rt == IntType && op != IMPLIES:
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 
 	case lt == FloatType && rt == FloatType && op != IMPLIES:
@@ -60,7 +60,15 @@ func (bo *BinaryOperation) Type() ExpressionType {
 	}
 
 	switch bo.Operator {
-	case ADD, SUB, MUL, DIV, REM, XOR, SHL, SHR:
+	case ADD, SUB, MUL, DIV:
+		if bo.Left.Type() == FloatType {
+			return FloatType
+		}
+		if bo.Left.Type() == IntType {
+			return IntType
+		}
+		return BoolType
+	case REM, XOR, SHL, SHR:
 		return IntType
 	case AND, OR, AND_NOT:
 		if bo.Left.Type() == IntType {
