@@ -39,6 +39,18 @@ func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *Bina
 		(op == EQ || op == NE):
 		return &BinaryOperation{Left: left.(*Ref).Idx, Right: right.(*Ref).Idx, Operator: op}
 
+	case lt == RefType && rt == NilType &&
+		(op == EQ || op == NE):
+		return &BinaryOperation{Left: left.(*Ref).Idx, Right: NewRef(0, left.(*Ref).RefType), Operator: op}
+
+	case lt == NilType && rt == RefType &&
+		(op == EQ || op == NE):
+		return &BinaryOperation{Left: NewRef(0, right.(*Ref).RefType), Right: right.(*Ref).Idx, Operator: op}
+
+	case lt == NilType && rt == NilType &&
+		(op == EQ || op == NE):
+		return &BinaryOperation{Left: NewIntConstant(0), Right: NewIntConstant(0), Operator: op}
+
 	default:
 		panic(fmt.Errorf("binary op %v not supported for %s(%v) and %s(%v)", op, left, lt, right, rt))
 	}

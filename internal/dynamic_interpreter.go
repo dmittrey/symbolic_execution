@@ -173,68 +173,64 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	switch v := value.(type) {
 
 	case *ssa.Parameter:
-		// 1) если уже создавали ref для этого параметра — переиспользуем
+		// reuse
 		if ref, ok := interpreter.paramRef[v]; ok {
-			// pointer param => возвращаем адрес
+			// pointer param => address
 			if _, isPtr := v.Type().Underlying().(*types.Pointer); isPtr {
 				return ref
 			}
-			// slice param => возвращаем handle массива
+			// slice param => handle (array ref)
 			if _, _, isSlice := sliceDepthBase(v.Type()); isSlice {
 				return ref
 			}
-			// struct param => возвращаем адрес на struct
+			// struct-by-value param => we model as address to struct
 			if _, _, isStruct := structMeta(v.Type()); isStruct {
 				return ref
 			}
-			// обычный value-параметр => читаем значение из сегмента
+			// primitive-by-value param => read from cell
 			return interpreter.Heap.GetValue(ref)
 		}
 
-		// 2) создаём ref один раз и кладём в кэш
+		// create once
 
-		// struct / *struct
+		// struct / *struct  => address to struct
 		if typeName, fields, ok := structMeta(v.Type()); ok {
-			r := interpreter.Heap.ParamStruct(typeName, fields)
+			r := interpreter.Heap.AllocateStruct(typeName, fields, true) // isAliasing=true for params
 			interpreter.paramRef[v] = r
 			return r
 		}
 
 		// []T / [][]T / ...
 		if depth, base, ok := sliceDepthBase(v.Type()); ok {
-			// []struct — разрешаем только одномерный
+			// []struct only 1D
 			if typeName, fields, ok2 := structMeta(base); ok2 {
 				if depth != 1 {
 					panic("Parameter: multidimensional array of structs is not supported")
 				}
-				r := interpreter.Heap.ParamStructsArray(0, typeName, fields)
+				r := interpreter.Heap.AllocateStructsArray(0, typeName, fields, true)
 				interpreter.paramRef[v] = r
 				return r
 			}
 
 			baseTy := goTypeToSym(base)
-			dim := depth - 1 // []T => 0, [][]T => 1, ...
-			var r *symbolic.Ref
-			if dim == 0 {
-				r = interpreter.Heap.ParamPrimitiveArray(baseTy)
-			} else {
-				r = interpreter.Heap.ParamComplexArray(dim, baseTy)
-			}
+			dim := depth - 1 // []T=>0, [][]T=>1, ...
+			r := interpreter.Heap.AllocateArray(dim, baseTy, true)
 			interpreter.paramRef[v] = r
 			return r
 		}
 
-		// *T (указатель на примитив/строку)
+		// *T pointer to primitive/string/float/bool
 		if p, ok := v.Type().Underlying().(*types.Pointer); ok {
+			// *struct already caught above by structMeta
 			elemTy := goTypeToSym(p.Elem())
-			r := interpreter.Heap.Param(elemTy) // адрес
+			r := interpreter.Heap.Allocate(elemTy, true)
 			interpreter.paramRef[v] = r
 			return r
 		}
 
-		// обычный примитив как value: создаём адрес + читаем значение
+		// primitive-by-value
 		ty := goTypeToSym(v.Type())
-		ref := interpreter.Heap.Param(ty)
+		ref := interpreter.Heap.Allocate(ty, true)
 		interpreter.paramRef[v] = ref
 		return interpreter.Heap.GetValue(ref)
 
@@ -245,7 +241,7 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	case *ssa.Alloc:
 		// struct / *struct
 		if typeName, fields, ok := structMeta(v.Type()); ok {
-			r := interpreter.Heap.AllocateStruct(typeName, fields)
+			r := interpreter.Heap.AllocateStruct(typeName, fields, false)
 			interpreter.Env[v] = r
 			return r
 		}
@@ -256,39 +252,34 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 				if depth != 1 {
 					panic("Alloc: multidimensional array of structs is not supported")
 				}
-				r := interpreter.Heap.AllocateStructsArray(0, typeName, fields)
+				r := interpreter.Heap.AllocateStructsArray(0, typeName, fields, false)
 				interpreter.Env[v] = r
 				return r
 			}
 
 			baseTy := goTypeToSym(base)
 			dim := depth - 1
-			if dim == 0 {
-				r := interpreter.Heap.AllocatePrimitiveArray(baseTy)
-				interpreter.Env[v] = r
-				return r
-			}
-			r := interpreter.Heap.AllocateComplexArray(dim, baseTy)
+			r := interpreter.Heap.AllocateArray(dim, baseTy, false)
 			interpreter.Env[v] = r
 			return r
 		}
 
-		// pointer alloc: тип = *T
+		// pointer alloc: *T
 		if p, ok := v.Type().Underlying().(*types.Pointer); ok {
 			if typeName, fields, ok2 := structMeta(p.Elem()); ok2 {
-				r := interpreter.Heap.AllocateStruct(typeName, fields)
+				r := interpreter.Heap.AllocateStruct(typeName, fields, false)
 				interpreter.Env[v] = r
 				return r
 			}
 			ty := goTypeToSym(p.Elem())
-			r := interpreter.Heap.Allocate(ty)
+			r := interpreter.Heap.Allocate(ty, false)
 			interpreter.Env[v] = r
 			return r
 		}
 
-		// примитив
+		// primitive
 		ty := goTypeToSym(v.Type())
-		r := interpreter.Heap.Allocate(ty)
+		r := interpreter.Heap.Allocate(ty, false)
 		interpreter.Env[v] = r
 		return r
 
@@ -313,9 +304,6 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		panic(fmt.Sprintf("Convert not supported: %s -> %s (%s)",
 			src.Type().String(), dstTy.String(), v.String()))
 
-	/*
-		MakeSlice: создаём новый массив/слайс
-	*/
 	case *ssa.MakeSlice:
 		depth, base, ok := sliceDepthBase(v.Type())
 		if !ok {
@@ -326,19 +314,14 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 			if depth != 1 {
 				panic("MakeSlice: multidimensional array of structs is not supported")
 			}
-			r := interpreter.Heap.AllocateStructsArray(0, typeName, fields)
+			r := interpreter.Heap.AllocateStructsArray(0, typeName, fields, false)
 			interpreter.Env[v] = r
 			return r
 		}
 
 		baseTy := goTypeToSym(base)
 		dim := depth - 1
-		if dim == 0 {
-			r := interpreter.Heap.AllocatePrimitiveArray(baseTy)
-			interpreter.Env[v] = r
-			return r
-		}
-		r := interpreter.Heap.AllocateComplexArray(dim, baseTy)
+		r := interpreter.Heap.AllocateArray(dim, baseTy, false)
 		interpreter.Env[v] = r
 		return r
 
@@ -666,20 +649,24 @@ func (it *Interpreter) load(lv LValue) symbolic.SymbolicExpression {
 		return it.Heap.GetValue(lv.Base)
 
 	case LVStructField:
-		fr := it.Heap.FieldAddress(lv.Base, lv.Field)
-		raw := it.Heap.GetValue(fr) // "что лежит в поле"
+		fr := it.Heap.StructFieldAddr(lv.Base, lv.Field)
+		raw := it.Heap.GetValue(fr) // what is stored in field segment
 
-		// FieldAddr имеет тип "*T" (адрес поля). Нам нужен именно T.
+		// FieldAddr has type "*T", but we need T
 		ft := lv.SsaType
 		if p, ok := ft.Underlying().(*types.Pointer); ok {
 			ft = p.Elem()
 		}
 
-		// 1) поле-слайс: T == []U / [][]U / ...
+		// 1) field is slice: []U / [][]U / ...
 		if depth, base, ok := sliceDepthBase(ft); ok {
+			// if field is nil in model => treat as base 0 (so IndexAddr still works)
+			if raw.Type() == symbolic.NilType {
+				raw = symbolic.NewIntConstant(0)
+			}
+
 			dim := depth - 1
 
-			// []struct (только 1D)
 			if typeName, fields, ok2 := structMeta(base); ok2 {
 				if depth != 1 {
 					panic("load struct field: multidimensional slice of structs is not supported")
@@ -694,37 +681,37 @@ func (it *Interpreter) load(lv LValue) symbolic.SymbolicExpression {
 			return symbolic.NewArrayRefFromExpr(raw, dim, baseTy)
 		}
 
-		// 2) поле-указатель: T == *U  (например RefField *SimpleDataClass)
+		// 2) field is pointer: *U
 		if p, ok := ft.Underlying().(*types.Pointer); ok {
+			// nil pointer stays NilConstant
+			if raw.Type() == symbolic.NilType {
+				return raw
+			}
+
 			// pointer to struct
 			if typeName, fields, ok2 := structMeta(p.Elem()); ok2 {
 				_ = fields
-				return &symbolic.Ref{
-					Idx:            raw,                 // ВАЖНО: idx — выражение (BV address)
-					RefType:        symbolic.StructType, // адрес на struct-объект
-					StructTypeName: typeName,
-					StructFieldIdx: -1,
-					ArrayDimension: -1,
-					ArrayBaseType:  symbolic.NONE,
-				}
+				return symbolic.NewStructRefFromExpr(raw, typeName)
 			}
 
 			// pointer to primitive/string/float/bool
 			elemTy := goTypeToSym(p.Elem())
-			return &symbolic.Ref{
-				Idx:            raw,
-				RefType:        elemTy,
-				StructFieldIdx: -1,
-				ArrayDimension: -1,
-				ArrayBaseType:  symbolic.NONE,
-			}
+			return symbolic.NewRefFromExpr(raw, elemTy)
 		}
 
-		// иначе поле — обычное значение (int/bool/float/struct-by-value и т.п.)
+		// otherwise it's plain value
 		return raw
 
 	case LVArrayElem:
-		return it.Heap.GetFromArray(lv.Base, lv.Index)
+		eref := it.Heap.ArrayElemAddr(lv.Base, lv.Index)
+
+		// IMPORTANT: element is a struct => value is a struct-ref (whole object),
+		// calling GetValue would panic ("can't read whole struct")
+		if eref.RefType == symbolic.StructType && eref.StructFieldIdx == -1 {
+			return eref
+		}
+
+		return it.Heap.GetValue(eref)
 
 	default:
 		panic("unknown lvalue kind")
@@ -737,11 +724,12 @@ func (it *Interpreter) store(lv LValue, val symbolic.SymbolicExpression) {
 		it.Heap.AssignValue(lv.Base, val)
 
 	case LVStructField:
-		fr := it.Heap.FieldAddress(lv.Base, lv.Field)
+		fr := it.Heap.StructFieldAddr(lv.Base, lv.Field)
 		it.Heap.AssignValue(fr, val)
 
 	case LVArrayElem:
-		it.Heap.AssignToArray(lv.Base, lv.Index, val)
+		eref := it.Heap.ArrayElemAddr(lv.Base, lv.Index)
+		it.Heap.AssignValue(eref, val)
 
 	default:
 		panic("unknown lvalue kind")
@@ -851,11 +839,10 @@ func (it *Interpreter) nilForType(t types.Type) symbolic.SymbolicExpression {
 		break
 	}
 
-	// nil slice: []T, [][]T, ...
+	// nil slice => keep as array handle 0 (so IndexAddr still works)
 	if depth, base, ok := sliceDepthBase(t); ok {
 		dim := depth - 1
 
-		// []struct allowed only 1D (per your constraints)
 		if typeName, fields, ok2 := structMeta(base); ok2 {
 			if depth != 1 {
 				panic("nilForType: multidimensional array of structs is not supported")
@@ -870,33 +857,11 @@ func (it *Interpreter) nilForType(t types.Type) symbolic.SymbolicExpression {
 		return symbolic.NewArrayRefFromExpr(zero, dim, baseTy)
 	}
 
-	// nil pointer: *T
-	if p, ok := t.Underlying().(*types.Pointer); ok {
-		// pointer to struct
-		if typeName, fields, ok2 := structMeta(p.Elem()); ok2 {
-			r := &symbolic.Ref{
-				Idx:            zero,
-				RefType:        symbolic.StructType,
-				StructTypeName: typeName,
-				StructFieldIdx: -1,
-				ArrayDimension: -1,
-				ArrayBaseType:  symbolic.NONE,
-			}
-			_ = fields
-			return r
-		}
-
-		elemTy := goTypeToSym(p.Elem())
-		return &symbolic.Ref{
-			Idx:            zero,
-			RefType:        elemTy,
-			StructFieldIdx: -1,
-			ArrayDimension: -1,
-			ArrayBaseType:  symbolic.NONE,
-		}
+	// nil pointer => NilConstant (to be handled in binop)
+	if _, ok := t.Underlying().(*types.Pointer); ok {
+		return symbolic.NewNilConstant()
 	}
 
-	// nil interface / map / chan etc — если появится, лучше явно увидеть
 	panic(fmt.Sprintf("nilForType: unsupported nil type: %s (%T)", t.String(), t))
 }
 
