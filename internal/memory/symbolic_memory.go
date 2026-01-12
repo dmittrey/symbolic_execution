@@ -46,6 +46,7 @@ type SymbolicMemory struct {
 	IntSegment    symbolic.Array //SymId -> BV
 	BoolSegment   symbolic.Array //SymId -> Bool
 	StringSegment symbolic.Array //SymId -> UF
+	FloatSegment  symbolic.Array //SymId -> Real
 
 	// Array
 	ArraySegment symbolic.Array //SymId -> SymId
@@ -64,6 +65,7 @@ func NewSymbolicMemory() *SymbolicMemory {
 		IntSegment:    symbolic.NewArray("IntSegment", symbolic.IntType),
 		BoolSegment:   symbolic.NewArray("BoolSegment", symbolic.BoolType),
 		StringSegment: symbolic.NewArray("StringSegment", symbolic.StringType),
+		FloatSegment:  symbolic.NewArray("FloatSegment", symbolic.FloatType),
 
 		ArraySegment: symbolic.NewArray("ArraySegment", symbolic.IntType),
 
@@ -129,8 +131,38 @@ func (mem *SymbolicMemory) AssignValue(ref *symbolic.Ref, value symbolic.Symboli
 		mem.BoolSegment.Store(refKey, value)
 	case symbolic.StringType:
 		mem.StringSegment.Store(refKey, value)
+
 	case symbolic.StructType:
-		(mem.StructSegments[ref.StructTypeName][ref.StructFieldIdx]).Store(refKey, value)
+		// !!! ВАЖНО: если fieldIdx == -1 — это присваивание ВСЕГО struct.
+		if ref.StructFieldIdx == -1 {
+			src, ok := value.(*symbolic.Ref)
+			if !ok || src.RefType != symbolic.StructType {
+				panic("AssignValue: assigning non-struct into whole struct")
+			}
+			if src.StructTypeName != ref.StructTypeName {
+				panic("AssignValue: struct type mismatch in whole-struct assignment")
+			}
+
+			fields := mem.StructSegments[ref.StructTypeName]
+			if fields == nil {
+				panic("AssignValue: struct type not registered: " + ref.StructTypeName)
+			}
+
+			// копируем все поля: dst.field[i] = src.field[i]
+			for fieldIdx := range fields {
+				dstField := mem.FieldAddress(ref, fieldIdx)
+				srcField := mem.FieldAddress(src, fieldIdx)
+				mem.AssignValue(dstField, mem.GetValue(srcField))
+			}
+			return
+		}
+
+		seg := mem.StructSegments[ref.StructTypeName][ref.StructFieldIdx]
+		if seg == nil {
+			panic("AssignValue: struct field segment is nil")
+		}
+		seg.Store(refKey, value)
+
 	default:
 		panic("unknown ref type")
 	}
@@ -146,6 +178,8 @@ func (mem *SymbolicMemory) GetValue(ref *symbolic.Ref) symbolic.SymbolicExpressi
 		return mem.BoolSegment.Access(refKey)
 	case symbolic.StringType:
 		return mem.StringSegment.Access(refKey)
+	case symbolic.FloatType:
+		return mem.FloatSegment.Access(refKey)
 	case symbolic.StructType:
 		return (mem.StructSegments[ref.StructTypeName][ref.StructFieldIdx]).Access(refKey)
 	default:
@@ -211,8 +245,21 @@ func (mem *SymbolicMemory) AssignToArray(ref *symbolic.Ref, index symbolic.Symbo
 		mem.BoolSegment.Store(slotAddr, value)
 	case symbolic.StringType:
 		mem.StringSegment.Store(slotAddr, value)
+	case symbolic.FloatType:
+		mem.FloatSegment.Store(slotAddr, value)
 	case symbolic.StructType:
-		panic("AssignToArray: assigning whole struct is not supported; assign fields instead")
+		// Массив структур/указателей на структуры храним как массив "адресов объектов"
+		if vref, ok := value.(*symbolic.Ref); ok {
+			if vref.RefType != symbolic.StructType {
+				panic("AssignToArray: expected struct ref value for struct array")
+			}
+			mem.ArraySegment.Store(slotAddr, vref.Idx)
+			return
+		}
+		// опционально: разрешить "сырой" адрес как SymbolicExpression
+		mem.ArraySegment.Store(slotAddr, value)
+		return
+
 	default:
 		panic("unknown base type")
 	}
@@ -242,6 +289,8 @@ func (mem *SymbolicMemory) GetFromArray(ref *symbolic.Ref, index symbolic.Symbol
 		return mem.BoolSegment.Access(slotAddr)
 	case symbolic.StringType:
 		return mem.StringSegment.Access(slotAddr)
+	case symbolic.FloatType:
+		return mem.FloatSegment.Access(slotAddr)
 	case symbolic.StructType:
 		// Потом в FieldAddress доуточним
 		objAddr := mem.ArraySegment.Access(slotAddr) // BV address of struct object
@@ -316,6 +365,7 @@ func (mem *SymbolicMemory) segmentConstraints() []symbolic.SymbolicExpression {
 		&mem.IntSegment,
 		&mem.BoolSegment,
 		&mem.StringSegment,
+		&mem.FloatSegment,
 		&mem.ArraySegment,
 	}
 	for _, fields := range mem.StructSegments {

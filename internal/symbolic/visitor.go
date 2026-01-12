@@ -9,6 +9,8 @@ type Visitor interface {
 	VisitUnaryOperation(expr *UnaryOperation) interface{}
 	VisitConditionalExpression(expr *ConditionalExpression) interface{}
 	VisitStringConstant(*StringConstant) interface{}
+	VisitFloatConstant(expr *FloatConstant) interface{}
+	VisitRef(r *Ref) interface{}
 
 	// Arrays
 	VisitArray(expr *Array) interface{}

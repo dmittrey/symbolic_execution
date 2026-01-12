@@ -37,6 +37,11 @@ type Interpreter struct {
 	ReturnResults []symbolic.SymbolicExpression
 	Heap          memory.Memory
 	Env           map[ssa.Value]symbolic.SymbolicExpression
+
+	// built-in len
+	LenCache map[string]symbolic.SymbolicExpression
+
+	paramRef map[ssa.Value]*symbolic.Ref
 }
 
 func NewInterpreter(analyser *Analyser, pathCond symbolic.SymbolicExpression) Interpreter {
@@ -46,6 +51,10 @@ func NewInterpreter(analyser *Analyser, pathCond symbolic.SymbolicExpression) In
 		PathCondition: pathCond,
 		Heap:          memory.NewSymbolicMemory(),
 		Env:           make(map[ssa.Value]symbolic.SymbolicExpression),
+
+		LenCache: make(map[string]symbolic.SymbolicExpression),
+
+		paramRef: make(map[ssa.Value]*symbolic.Ref),
 	}
 }
 
@@ -106,7 +115,7 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 
 		// then -> Succs[0]
 		if len(i.Block().Succs) >= 1 {
-			thenState := *interpreter
+			thenState := interpreter.cloneMapsOnly()
 			thenState.PathCondition = symbolic.NewBinaryOperation(
 				thenState.PathCondition,
 				cond,
@@ -117,7 +126,7 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 
 		// else -> Succs[1]
 		if len(i.Block().Succs) >= 2 {
-			elseState := *interpreter
+			elseState := interpreter.cloneMapsOnly()
 			notCond := symbolic.NewUnaryOperation(cond, symbolic.NOT)
 			elseState.PathCondition = symbolic.NewBinaryOperation(
 				elseState.PathCondition,
@@ -140,7 +149,8 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 	// Инструкции, которые также Value — будут резолвиться в resolveExpression
 	case *ssa.BinOp, *ssa.UnOp,
 		*ssa.FieldAddr, *ssa.IndexAddr,
-		*ssa.Slice, *ssa.MakeSlice, *ssa.Alloc:
+		*ssa.Slice, *ssa.MakeSlice, *ssa.Alloc,
+		*ssa.Convert, *ssa.Call:
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 
 	default:
@@ -162,12 +172,32 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 
 	switch v := value.(type) {
 
-	// Parameter: входной параметр функции
 	case *ssa.Parameter:
+		// 1) если уже создавали ref для этого параметра — переиспользуем
+		if ref, ok := interpreter.paramRef[v]; ok {
+			// pointer param => возвращаем адрес
+			if _, isPtr := v.Type().Underlying().(*types.Pointer); isPtr {
+				return ref
+			}
+			// slice param => возвращаем handle массива
+			if _, _, isSlice := sliceDepthBase(v.Type()); isSlice {
+				return ref
+			}
+			// struct param => возвращаем адрес на struct
+			if _, _, isStruct := structMeta(v.Type()); isStruct {
+				return ref
+			}
+			// обычный value-параметр => читаем значение из сегмента
+			return interpreter.Heap.GetValue(ref)
+		}
+
+		// 2) создаём ref один раз и кладём в кэш
+
 		// struct / *struct
 		if typeName, fields, ok := structMeta(v.Type()); ok {
-			// моделируем как "адрес на struct"
-			return interpreter.Heap.ParamStruct(typeName, fields)
+			r := interpreter.Heap.ParamStruct(typeName, fields)
+			interpreter.paramRef[v] = r
+			return r
 		}
 
 		// []T / [][]T / ...
@@ -177,27 +207,35 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 				if depth != 1 {
 					panic("Parameter: multidimensional array of structs is not supported")
 				}
-				return interpreter.Heap.ParamStructsArray(0, typeName, fields)
+				r := interpreter.Heap.ParamStructsArray(0, typeName, fields)
+				interpreter.paramRef[v] = r
+				return r
 			}
 
 			baseTy := goTypeToSym(base)
 			dim := depth - 1 // []T => 0, [][]T => 1, ...
+			var r *symbolic.Ref
 			if dim == 0 {
-				return interpreter.Heap.ParamPrimitiveArray(baseTy)
+				r = interpreter.Heap.ParamPrimitiveArray(baseTy)
+			} else {
+				r = interpreter.Heap.ParamComplexArray(dim, baseTy)
 			}
-			return interpreter.Heap.ParamComplexArray(dim, baseTy)
+			interpreter.paramRef[v] = r
+			return r
 		}
 
 		// *T (указатель на примитив/строку)
 		if p, ok := v.Type().Underlying().(*types.Pointer); ok {
-			// *struct уже поймали выше в structMeta
 			elemTy := goTypeToSym(p.Elem())
-			return interpreter.Heap.Param(elemTy) // адрес
+			r := interpreter.Heap.Param(elemTy) // адрес
+			interpreter.paramRef[v] = r
+			return r
 		}
 
 		// обычный примитив как value: создаём адрес + читаем значение
 		ty := goTypeToSym(v.Type())
 		ref := interpreter.Heap.Param(ty)
+		interpreter.paramRef[v] = ref
 		return interpreter.Heap.GetValue(ref)
 
 	/*
@@ -262,6 +300,19 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		interpreter.Env[v] = res
 		return res
 
+	case *ssa.Convert:
+		src := interpreter.resolveExpression(v.X)
+		dstTy := goTypeToSym(v.Type())
+
+		// (byte/rune/int32/uint8/...) => IntType,
+		if src.Type() == dstTy {
+			interpreter.Env[v] = src
+			return src
+		}
+
+		panic(fmt.Sprintf("Convert not supported: %s -> %s (%s)",
+			src.Type().String(), dstTy.String(), v.String()))
+
 	/*
 		MakeSlice: создаём новый массив/слайс
 	*/
@@ -294,7 +345,7 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	// Константы
 	case *ssa.Const:
 		if v.Value == nil {
-			panic("unsupported nil value")
+			return interpreter.nilForType(v.Type())
 		}
 
 		switch v.Value.Kind() {
@@ -310,6 +361,13 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 
 		case constant.String:
 			return symbolic.NewStringConstant(constant.StringVal(v.Value))
+
+		case constant.Float:
+			f, ok := constant.Float64Val(v.Value)
+			if !ok {
+				panic(fmt.Sprintf("float const not supported: %s", v.Value.String()))
+			}
+			return symbolic.NewFloatConstant(f)
 
 		default:
 			panic(fmt.Sprintf("unsupported const kind: %v", v.Value.Kind()))
@@ -344,7 +402,33 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 		return symbolic.NewSymbolicVariable(v.Name(), goTypeToSym(v.Type()))
 
 	case *ssa.Call:
-		panic("Implement me HW5!")
+		// builtin len(...) stub
+		if b, ok := v.Call.Value.(*ssa.Builtin); ok && b.Name() == "len" {
+			if len(v.Call.Args) != 1 {
+				panic("len(): unexpected args count")
+			}
+
+			arg := v.Call.Args[0]
+
+			// (опционально, но полезно) len(nil) = 0
+			if c, ok := arg.(*ssa.Const); ok && c.Value == nil {
+				return symbolic.NewIntConstant(0)
+			}
+
+			key := "len@" + arg.String() // достаточно стабильно
+			if cached, ok := interpreter.LenCache[key]; ok {
+				interpreter.Env[v] = cached
+				return cached
+			}
+
+			stub := symbolic.NewSymbolicVariable("len_"+sanitizeName(arg.String()), symbolic.IntType)
+			interpreter.LenCache[key] = stub
+			interpreter.Env[v] = stub
+			return stub
+		}
+
+		// остальные вызовы пока как HW5
+		panic("Support *ssa.Call (non-len builtin) in HW5!")
 
 	default:
 		panic(fmt.Sprintf("Support me! %T", v))
@@ -421,13 +505,23 @@ func goTypeToSym(t types.Type) symbolic.ExpressionType {
 			return symbolic.IntType
 		case tt.Info()&types.IsString != 0:
 			return symbolic.StringType
+		case tt.Info()&types.IsFloat != 0:
+			return symbolic.FloatType // если ты уже добавил FloatType
 		}
+
 	case *types.Pointer:
 		return goTypeToSym(tt.Elem())
+
 	case *types.Struct:
 		return symbolic.StructType
+
 	case *types.Array:
 		return goTypeToSym(tt.Elem())
+
+	case *types.Slice:
+		// ключевой фикс: [][]int -> []int -> int
+		return goTypeToSym(tt.Elem())
+
 	default:
 		panic(fmt.Sprintf("goTypeToSym: not impl: %T (%s)", tt, t.String()))
 	}
@@ -573,7 +667,61 @@ func (it *Interpreter) load(lv LValue) symbolic.SymbolicExpression {
 
 	case LVStructField:
 		fr := it.Heap.FieldAddress(lv.Base, lv.Field)
-		return it.Heap.GetValue(fr)
+		raw := it.Heap.GetValue(fr) // "что лежит в поле"
+
+		// FieldAddr имеет тип "*T" (адрес поля). Нам нужен именно T.
+		ft := lv.SsaType
+		if p, ok := ft.Underlying().(*types.Pointer); ok {
+			ft = p.Elem()
+		}
+
+		// 1) поле-слайс: T == []U / [][]U / ...
+		if depth, base, ok := sliceDepthBase(ft); ok {
+			dim := depth - 1
+
+			// []struct (только 1D)
+			if typeName, fields, ok2 := structMeta(base); ok2 {
+				if depth != 1 {
+					panic("load struct field: multidimensional slice of structs is not supported")
+				}
+				r := symbolic.NewArrayRefFromExpr(raw, 0, symbolic.StructType)
+				r.StructTypeName = typeName
+				_ = fields
+				return r
+			}
+
+			baseTy := goTypeToSym(base)
+			return symbolic.NewArrayRefFromExpr(raw, dim, baseTy)
+		}
+
+		// 2) поле-указатель: T == *U  (например RefField *SimpleDataClass)
+		if p, ok := ft.Underlying().(*types.Pointer); ok {
+			// pointer to struct
+			if typeName, fields, ok2 := structMeta(p.Elem()); ok2 {
+				_ = fields
+				return &symbolic.Ref{
+					Idx:            raw,                 // ВАЖНО: idx — выражение (BV address)
+					RefType:        symbolic.StructType, // адрес на struct-объект
+					StructTypeName: typeName,
+					StructFieldIdx: -1,
+					ArrayDimension: -1,
+					ArrayBaseType:  symbolic.NONE,
+				}
+			}
+
+			// pointer to primitive/string/float/bool
+			elemTy := goTypeToSym(p.Elem())
+			return &symbolic.Ref{
+				Idx:            raw,
+				RefType:        elemTy,
+				StructFieldIdx: -1,
+				ArrayDimension: -1,
+				ArrayBaseType:  symbolic.NONE,
+			}
+		}
+
+		// иначе поле — обычное значение (int/bool/float/struct-by-value и т.п.)
+		return raw
 
 	case LVArrayElem:
 		return it.Heap.GetFromArray(lv.Base, lv.Index)
@@ -689,4 +837,101 @@ func (it *Interpreter) normalizeIndexBaseToArrayRef(x ssa.Value, br *symbolic.Re
 	panic(fmt.Sprintf("normalizeIndexBaseToArrayRef: base %s is not array-like (type=%s), baseRefType=%s",
 		x.String(), x.Type().String(), br.RefType.String(),
 	))
+}
+
+func (it *Interpreter) nilForType(t types.Type) symbolic.SymbolicExpression {
+	zero := symbolic.NewIntConstant(0)
+
+	// unwrap named
+	for {
+		if n, ok := t.(*types.Named); ok {
+			t = n.Underlying()
+			continue
+		}
+		break
+	}
+
+	// nil slice: []T, [][]T, ...
+	if depth, base, ok := sliceDepthBase(t); ok {
+		dim := depth - 1
+
+		// []struct allowed only 1D (per your constraints)
+		if typeName, fields, ok2 := structMeta(base); ok2 {
+			if depth != 1 {
+				panic("nilForType: multidimensional array of structs is not supported")
+			}
+			r := symbolic.NewArrayRefFromExpr(zero, 0, symbolic.StructType)
+			r.StructTypeName = typeName
+			_ = fields
+			return r
+		}
+
+		baseTy := goTypeToSym(base)
+		return symbolic.NewArrayRefFromExpr(zero, dim, baseTy)
+	}
+
+	// nil pointer: *T
+	if p, ok := t.Underlying().(*types.Pointer); ok {
+		// pointer to struct
+		if typeName, fields, ok2 := structMeta(p.Elem()); ok2 {
+			r := &symbolic.Ref{
+				Idx:            zero,
+				RefType:        symbolic.StructType,
+				StructTypeName: typeName,
+				StructFieldIdx: -1,
+				ArrayDimension: -1,
+				ArrayBaseType:  symbolic.NONE,
+			}
+			_ = fields
+			return r
+		}
+
+		elemTy := goTypeToSym(p.Elem())
+		return &symbolic.Ref{
+			Idx:            zero,
+			RefType:        elemTy,
+			StructFieldIdx: -1,
+			ArrayDimension: -1,
+			ArrayBaseType:  symbolic.NONE,
+		}
+	}
+
+	// nil interface / map / chan etc — если появится, лучше явно увидеть
+	panic(fmt.Sprintf("nilForType: unsupported nil type: %s (%T)", t.String(), t))
+}
+
+func sanitizeName(s string) string {
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			out = append(out, r)
+		} else {
+			out = append(out, '_')
+		}
+	}
+	if len(out) == 0 {
+		return "x"
+	}
+	return string(out)
+}
+
+func (it *Interpreter) cloneMapsOnly() Interpreter {
+	cp := *it
+
+	cp.Env = make(map[ssa.Value]symbolic.SymbolicExpression, len(it.Env))
+	for k, v := range it.Env {
+		cp.Env[k] = v
+	}
+
+	cp.LenCache = make(map[string]symbolic.SymbolicExpression, len(it.LenCache))
+	for k, v := range it.LenCache {
+		cp.LenCache[k] = v
+	}
+
+	cp.paramRef = make(map[ssa.Value]*symbolic.Ref, len(it.paramRef))
+	for k, v := range it.paramRef {
+		cp.paramRef[k] = v
+	}
+
+	return cp
 }

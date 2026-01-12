@@ -3,6 +3,7 @@ package translator
 
 import (
 	"fmt"
+	"math/big"
 	"strconv"
 	"symbolic-execution-course/internal/symbolic"
 
@@ -21,6 +22,7 @@ type Z3Translator struct {
 	// Sorts
 	stringSort z3.Sort
 	bvSort     z3.Sort
+	realSort   z3.Sort
 }
 
 // NewZ3Translator создаёт новый экземпляр Z3 транслятора
@@ -36,6 +38,7 @@ func NewZ3Translator() *Z3Translator {
 		vars:       make(map[string]z3.Value),
 		stringSort: ctx.UninterpretedSort("String"),
 		bvSort:     ctx.BVSort(64),
+		realSort:   ctx.RealSort(),
 	}
 }
 
@@ -46,6 +49,8 @@ func (zt *Z3Translator) Reset() {
 
 	zt.vars = make(map[string]z3.Value)
 	zt.stringSort = zt.ctx.UninterpretedSort("String")
+	zt.bvSort = zt.ctx.BVSort(64)
+	zt.realSort = zt.ctx.RealSort()
 }
 
 func (zt *Z3Translator) Assert(expr interface{}) {
@@ -214,6 +219,40 @@ func (zt *Z3Translator) VisitBinaryOperation(expr *symbolic.BinaryOperation) int
 		}
 	}
 
+	if leftR, ok := leftZ3.(z3.Real); ok {
+		rightR, ok := rightZ3.(z3.Real)
+		if !ok {
+			panic("VisitBinaryOperation: both operands must be Real")
+		}
+
+		switch expr.Operator {
+		case symbolic.ADD:
+			return leftR.Add(rightR)
+		case symbolic.SUB:
+			return leftR.Sub(rightR)
+		case symbolic.MUL:
+			return leftR.Mul(rightR)
+		case symbolic.DIV:
+			return leftR.Div(rightR)
+
+		case symbolic.EQ:
+			return leftR.Eq(rightR)
+		case symbolic.NE:
+			return leftR.NE(rightR)
+		case symbolic.LT:
+			return leftR.LT(rightR)
+		case symbolic.LE:
+			return leftR.LE(rightR)
+		case symbolic.GT:
+			return leftR.GT(rightR)
+		case symbolic.GE:
+			return leftR.GE(rightR)
+
+		default:
+			panic("VisitBinaryOperation: unsupported operator for Real")
+		}
+	}
+
 	if leftZ3b, ok := leftZ3.(z3.Bool); ok {
 		rightZ3b, ok := rightZ3.(z3.Bool)
 		if !ok {
@@ -334,25 +373,67 @@ func (zt *Z3Translator) VisitConditionalExpression(expr *symbolic.ConditionalExp
 		panic("VisitConditionalExpression: expected boolean IfOperand operand")
 	}
 
-	if theni, ok := thent.(z3.Int); ok {
-		elsei, ok := elset.(z3.Int)
+	if thenBV, ok := thent.(z3.BV); ok {
+		elseBV, ok := elset.(z3.BV)
 		if !ok {
-			panic("VisitConditionalExpression: then/else must both be Int or both be Bool")
+			panic("VisitConditionalExpression: then/else types mismatch (BV)")
 		}
-		return ifb.IfThenElse(theni, elsei)
+		return ifb.IfThenElse(thenBV, elseBV)
 	}
-	if thenb, ok := thent.(z3.Bool); ok {
-		elseb, ok := elset.(z3.Bool)
+
+	if thenR, ok := thent.(z3.Real); ok {
+		elseR, ok := elset.(z3.Real)
 		if !ok {
-			panic("VisitConditionalExpression: then/else must both be Int or both be Bool")
+			panic("VisitConditionalExpression: then/else types mismatch (BV)")
 		}
-		return ifb.IfThenElse(thenb, elseb)
+		return ifb.IfThenElse(thenR, elseR)
 	}
+
+	if thenB, ok := thent.(z3.Bool); ok {
+		elseB, ok := elset.(z3.Bool)
+		if !ok {
+			panic("VisitConditionalExpression: then/else types mismatch (BV)")
+		}
+		return ifb.IfThenElse(thenB, elseB)
+	}
+
 	panic("VisitConditionalExpression: unsupported branch type (only Int/Bool supported)")
 }
 
 func (zt *Z3Translator) VisitStringConstant(c *symbolic.StringConstant) interface{} {
 	return zt.ctx.Const("str_"+c.Value, zt.stringSort)
+}
+
+func (zt *Z3Translator) VisitFloatConstant(expr *symbolic.FloatConstant) interface{} {
+	// Важно: FormatFloat даёт корректную десятичную строку
+	s := strconv.FormatFloat(expr.Value, 'g', -1, 64)
+
+	r := new(big.Rat)
+	if _, ok := r.SetString(s); !ok {
+		panic("VisitFloatConstant: can't parse float as rational: " + s)
+	}
+
+	return zt.ctx.FromBigRat(r)
+}
+
+func (zt *Z3Translator) VisitRef(r *symbolic.Ref) interface{} {
+	// Ref — это адрес, поэтому всегда BV64.
+	switch idx := r.Idx.(type) {
+	// если Idx — символьное выражение (чаще всего: addr_0 и т.п.)
+	case symbolic.SymbolicExpression:
+		v, err := zt.TranslateExpression(idx)
+		if err != nil {
+			panic("VisitRef: translate idx error: " + err.Error())
+		}
+		bv, ok := v.(z3.BV)
+		if !ok {
+			panic(fmt.Sprintf("VisitRef: idx is not BV (got %T)", v))
+		}
+		return bv
+
+	default:
+		panic(fmt.Sprintf("VisitRef: unsupported Ref.Idx type %T", r.Idx))
+	}
 }
 
 // Вспомогательные методы
@@ -366,11 +447,14 @@ func (zt *Z3Translator) createZ3Variable(name string, exprType symbolic.Expressi
 		return zt.ctx.BoolConst(name)
 	case symbolic.StringType:
 		return zt.ctx.Const(name, zt.stringSort)
+	case symbolic.FloatType:
+		return zt.ctx.Const(name, zt.realSort)
+	case symbolic.StructType:
+		return zt.ctx.Const(name, zt.bvSort)
 	case symbolic.ArrayType:
 		arrSort := zt.ctx.ArraySort(zt.bvSort, zt.bvSort)
 		return zt.ctx.Const(name, arrSort)
-	// TODO Возможно добавить BaseType в SymExpr и также VectorType
 	default:
-		panic("Not impl.")
+		panic(fmt.Sprintf("Not impl. %s", exprType.String()))
 	}
 }

@@ -16,6 +16,9 @@ func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *Bina
 	case lt == IntType && rt == IntType && (op != IMPLIES):
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 
+	case lt == FloatType && rt == FloatType && op != IMPLIES:
+		return &BinaryOperation{Left: left, Right: right, Operator: op}
+
 	case lt == BoolType && rt == BoolType &&
 		(op == EQ || op == NE || op == AND || op == OR || op == XOR || op == AND_NOT || op == IMPLIES):
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
@@ -25,6 +28,10 @@ func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *Bina
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 
 	case lt == ArrayType && rt == ArrayType &&
+		(op == EQ || op == NE):
+		return &BinaryOperation{Left: left, Right: right, Operator: op}
+
+	case lt == StructType && rt == StructType &&
 		(op == EQ || op == NE):
 		return &BinaryOperation{Left: left, Right: right, Operator: op}
 
@@ -40,17 +47,26 @@ func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *Bina
 // SymbolicExpression
 
 func (bo *BinaryOperation) Type() ExpressionType {
+	// float арифметика
+	if bo.Left.Type() == FloatType && bo.Right.Type() == FloatType {
+		switch bo.Operator {
+		case ADD, SUB, MUL, DIV:
+			return FloatType
+		case EQ, NE, LT, LE, GT, GE:
+			return BoolType
+		default:
+			panic("unsupported float operator")
+		}
+	}
+
 	switch bo.Operator {
 	case ADD, SUB, MUL, DIV, REM, XOR, SHL, SHR:
 		return IntType
 	case AND, OR, AND_NOT:
 		if bo.Left.Type() == IntType {
-			// Bitvec ops
 			return IntType
-		} else {
-			// Bool ops
-			return BoolType
 		}
+		return BoolType
 	case EQ, NE, LT, LE, GT, GE, IMPLIES:
 		return BoolType
 	default:

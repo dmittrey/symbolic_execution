@@ -82,6 +82,13 @@ func (zt *Z3Translator) VisitArray(expr *symbolic.Array) interface{} {
 				}
 				cs = append(cs, resT.Eq(selT))
 
+			case z3.Real:
+				selT, ok := sel.(z3.Real)
+				if !ok {
+					panic(fmt.Sprintf("VisitArray: select #%d type mismatch: res is Real, sel is %T", i, sel))
+				}
+				cs = append(cs, resT.Eq(selT))
+
 			case z3.Value:
 				// fallback: если вдруг библиотека возвращает какой-то Value-тип,
 				// у которого Eq есть только после конкретизации — лучше явно падать,
@@ -114,8 +121,11 @@ func (zt *Z3Translator) arrayElemSort(et symbolic.ExpressionType) z3.Sort {
 	case symbolic.BoolType:
 		return zt.ctx.BoolSort()
 	case symbolic.StringType:
-		// если строки у тебя как uninterpreted:
-		return zt.stringSort // либо zt.ctx.UninterpretedSort("String")
+		return zt.stringSort
+	case symbolic.FloatType:
+		return zt.realSort
+	case symbolic.StructType:
+		return zt.bvSort
 	default:
 		// Для ArraySegment у тебя ElemType = IntType, так что сюда не должно попасть
 		panic(fmt.Sprintf("unsupported array elem type: %v", et))

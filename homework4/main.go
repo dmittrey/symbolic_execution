@@ -176,8 +176,8 @@ func ReallyMultiDimensionalArray(array [][][]int) [][][]int {
 	return array
 }
 
-func FillMultiArrayWithArray(value []int) [][]int {
-	if len(value) < 2 {
+func FillMultiArrayWithArray(value []int, len_value int) [][]int {
+	if len_value < 2 {
 		return make([][]int, 0)
 	}
 	for i := range value {
@@ -473,7 +473,7 @@ func Example(value *ObjectWithPrimitivesClass) *ObjectWithPrimitivesClass {
 }
 
 func CreateObject(a, b int, objectExample *ObjectWithPrimitivesClass) *ObjectWithPrimitivesClass {
-	object := NewObjectWithPrimitivesClass()
+	object := &ObjectWithPrimitivesClass{ValueByDefault: 5}
 	object.x = a + 5
 	object.y = b + 6
 	object.Weight = objectExample.Weight
@@ -497,8 +497,8 @@ func Memory(objectExample *ObjectWithPrimitivesClass, value int) *ObjectWithPrim
 }
 
 func CompareTwoNullObjects(value int) int {
-	fst := NewObjectWithPrimitivesClass()
-	snd := NewObjectWithPrimitivesClass()
+	fst := &ObjectWithPrimitivesClass{ValueByDefault: 5}
+	snd := &ObjectWithPrimitivesClass{ValueByDefault: 5}
 
 	fst.x = value + 1
 	snd.x = value + 2
@@ -530,8 +530,6 @@ type ObjectWithRefFieldClass struct {
 
 func WriteToRefTypeField(objectExample *ObjectWithRefFieldClass, value int) *ObjectWithRefFieldClass {
 	if value != 42 {
-		return nil
-	} else if objectExample.RefField != nil {
 		return nil
 	}
 

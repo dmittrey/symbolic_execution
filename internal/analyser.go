@@ -31,6 +31,8 @@ func (analyser *Analyser) Analyse(source string, functionName string) []Interpre
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
+	const maxVisitsPerLoc = 5
+
 	builder := ssa.NewBuilder()
 
 	fn, err := builder.ParseAndBuildSSA(source, functionName)
@@ -52,6 +54,7 @@ func (analyser *Analyser) Analyse(source string, functionName string) []Interpre
 		instrIdx: 0,
 		priority: selector.CalculatePriority(startState),
 		pred:     nil,
+		visits:   make(map[LocKey]uint8),
 	})
 
 	results := make([]Interpreter, 0)
@@ -64,8 +67,6 @@ func (analyser *Analyser) Analyse(source string, functionName string) []Interpre
 			continue
 		}
 
-		st := it.value
-
 		select {
 		case <-ctx.Done():
 			fmt.Printf("Analyse stopped: %v\n", ctx.Err())
@@ -73,13 +74,35 @@ func (analyser *Analyser) Analyse(source string, functionName string) []Interpre
 		default:
 		}
 
+		loc := LocKey{Block: it.block.Index, InstrIx: it.instrIdx}
+		cnt := it.visits[loc]
+		if cnt >= maxVisitsPerLoc {
+			continue
+		}
+
+		parentVisits := cloneVisits(it.visits)
+		parentVisits[loc] = cnt + 1
+
+		st := it.value
 		nextItems := (&st).interpretDynamically(it.block, it.instrIdx, it.pred)
 
 		for _, ni := range nextItems {
+			ni.visits = cloneVisits(parentVisits) // <-- прокидываем
 			ni.priority = selector.CalculatePriority(ni.value)
 			heap.Push(&pq, ni)
 		}
 	}
 
 	return results
+}
+
+func cloneVisits(src map[LocKey]uint8) map[LocKey]uint8 {
+	if src == nil {
+		return make(map[LocKey]uint8)
+	}
+	dst := make(map[LocKey]uint8, len(src)+1)
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }

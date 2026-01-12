@@ -77,5 +77,5 @@ func (r *Ref) ExprName() string {
 }
 
 func (r *Ref) Accept(visitor Visitor) interface{} {
-	panic("Forbid to translate pure ref")
+	return visitor.VisitRef(r)
 }

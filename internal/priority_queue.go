@@ -4,6 +4,11 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
+type LocKey struct {
+	Block   int
+	InstrIx int
+}
+
 type Item struct {
 	value    Interpreter
 	block    *ssa.BasicBlock
@@ -11,6 +16,8 @@ type Item struct {
 	instrIdx int
 	priority int
 	index    int
+
+	visits map[LocKey]uint8 // <-- добавили
 }
 
 type PriorityQueue []*Item

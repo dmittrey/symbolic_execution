@@ -75,8 +75,18 @@ func (t *Array) Accept(visitor Visitor) interface{} {
 // ArrayExpression
 
 func (a *Array) Access(idx SymbolicExpression) SymbolicExpression {
-	res := NewSymbolicVariable(fmt.Sprintf("%s[%s]", a.Name, idx.String()), a.ElemType)
-	a.Ops = append(a.Ops, Op{Kind: OpSelect, Idx: idx, Val: res})
+	// уникальное имя на каждый select
+	n := len(a.Ops)
+	res := NewSymbolicVariable(
+		fmt.Sprintf("%s_sel%d", a.Name, n),
+		a.ElemType,
+	)
+
+	a.Ops = append(a.Ops, Op{
+		Kind: OpSelect,
+		Idx:  idx,
+		Val:  res,
+	})
 	return res
 }
 
