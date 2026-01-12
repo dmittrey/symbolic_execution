@@ -672,11 +672,11 @@ func TestPathConstraintMutability(p Person) int {
 		"ShlWithBigLongShift",
 
 		// calls (future work in HW5)
-		// "SimpleFormula",
-		// "CreateObjectFromValue",
-		// "ChangeObjectValueByMethod",
-		// "ParticularValue",
-		// "GetNullOrValue",
+		"SimpleFormula",
+		"CreateObjectFromValue",
+		"ChangeObjectValueByMethod",
+		"ParticularValue",
+		"GetNullOrValue",
 
 		// doubles
 		"CompareWithDiv",
@@ -691,8 +691,8 @@ func TestPathConstraintMutability(p Person) int {
 		"LoopInsideLoop",
 
 		// recursion (future work in HW5)
-		// "Factorial",
-		// "InfiniteRecursion",
+		"Factorial",
+		"InfiniteRecursion",
 
 		// structs
 		"NewObjectWithPrimitivesClass",
