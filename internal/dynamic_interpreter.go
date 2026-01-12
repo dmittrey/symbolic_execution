@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+
 	"symbolic-execution-course/internal/memory"
 	"symbolic-execution-course/internal/symbolic"
 
@@ -50,31 +51,35 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 	}
 
 	switch i := instr.(type) {
+
 	case *ssa.Return:
 		interpreter.ReturnResults = make([]symbolic.SymbolicExpression, len(i.Results))
 		for idx, val := range i.Results {
 			interpreter.ReturnResults[idx] = interpreter.resolveExpression(val)
 		}
-
 		return []*Item{{value: *interpreter, block: nil, instrIdx: -1}}
+
 	case *ssa.Panic:
-		// No results on panic
 		interpreter.ReturnResults = make([]symbolic.SymbolicExpression, 0)
-
 		return []*Item{{value: *interpreter, block: nil, instrIdx: -1}}
+
 	case *ssa.Select:
 		panic("Support me!")
+
 	case *ssa.Store:
 		val := interpreter.resolveExpression(i.Val)
 
 		switch a := i.Addr.(type) {
+
 		case *ssa.FieldAddr:
+			// *(&obj.field) = val  => obj.field = val
 			base := interpreter.resolveExpression(a.X)
 			br, ok := base.(*symbolic.Ref)
 			if !ok {
 				panic(fmt.Sprintf("Store: FieldAddr base is %T, want *symbolic.Ref", base))
 			}
-			interpreter.Heap.AssignField(br, a.Field, val)
+			fr := interpreter.Heap.FieldAddress(br, a.Field)
+			interpreter.Heap.AssignValue(fr, val)
 
 		case *ssa.IndexAddr:
 			// *(&arr[i]) = val  => arr[i] = val
@@ -91,6 +96,7 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 			interpreter.Heap.AssignToArray(br, idxExpr, val)
 
 		default:
+			// обычное присваивание по адресу ref
 			addrExpr := interpreter.resolveExpression(i.Addr)
 			r, ok := addrExpr.(*symbolic.Ref)
 			if !ok {
@@ -107,6 +113,7 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 			out = append(out, &Item{value: *interpreter, block: s, instrIdx: 0, pred: block})
 		}
 		return out
+
 	case *ssa.If:
 		cond := interpreter.resolveExpression(i.Cond)
 
@@ -114,7 +121,7 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 
 		// then -> Succs[0]
 		if len(i.Block().Succs) >= 1 {
-			thenState := *interpreter // копия
+			thenState := *interpreter
 			thenState.PathCondition = symbolic.NewBinaryOperation(
 				thenState.PathCondition,
 				cond,
@@ -122,8 +129,10 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 			)
 			out = append(out, &Item{value: thenState, block: block.Succs[0], instrIdx: 0, pred: block})
 		}
+
+		// else -> Succs[1]
 		if len(i.Block().Succs) >= 2 {
-			elseState := *interpreter // копия
+			elseState := *interpreter
 			notCond := symbolic.NewUnaryOperation(cond, symbolic.NOT)
 			elseState.PathCondition = symbolic.NewBinaryOperation(
 				elseState.PathCondition,
@@ -133,22 +142,22 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 			out = append(out, &Item{value: elseState, block: block.Succs[1], instrIdx: 0, pred: block})
 		}
 		return out
+
 	case *ssa.Phi:
 		edge, ok := pickPhiEdge(i, block, pred)
 		if !ok {
 			panic("phi: can't pick edge (pred is nil or not found)")
 		}
 		phiVal := interpreter.resolveExpression(edge)
-
 		interpreter.Env[i] = phiVal
-
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 
-	// Instructions that also implement Value interface will resolve later
+	// Инструкции, которые также Value — будут резолвиться в resolveExpression
 	case *ssa.BinOp, *ssa.UnOp,
 		*ssa.FieldAddr, *ssa.IndexAddr,
 		*ssa.Slice, *ssa.MakeSlice, *ssa.Alloc:
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
+
 	default:
 		panic(fmt.Sprintf("Support %T!", i))
 	}
@@ -167,109 +176,137 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	}
 
 	switch v := value.(type) {
-	// A Parameter represents an input parameter of a function.
+
+	// Parameter: входной параметр функции
 	case *ssa.Parameter:
 		// struct / *struct
 		if typeName, fields, ok := structMeta(v.Type()); ok {
-			return interpreter.Heap.ParamStructRef(v.Name(), typeName, fields)
+			// моделируем как "адрес на struct"
+			return interpreter.Heap.ParamStruct(typeName, fields)
 		}
 
-		// []T
-		if sl, ok := v.Type().Underlying().(*types.Slice); ok {
-			// если элемент — struct/*struct (включая []*T)
-			if typeName, fields, ok := structMeta(sl.Elem()); ok {
-				return interpreter.Heap.ParamArrayStructRef(v.Name(), typeName, fields)
+		// []T / [][]T / ...
+		if depth, base, ok := sliceDepthBase(v.Type()); ok {
+			// []struct — разрешаем только одномерный
+			if typeName, fields, ok2 := structMeta(base); ok2 {
+				if depth != 1 {
+					panic("Parameter: multidimensional array of structs is not supported")
+				}
+				return interpreter.Heap.ParamStructsArray(0, typeName, fields)
 			}
 
-			elemTy := goTypeToSym(sl.Elem())
-			return interpreter.Heap.ParamArrayRef(v.Name(), elemTy)
+			baseTy := goTypeToSym(base)
+			dim := depth - 1 // []T => 0, [][]T => 1, ...
+			if dim == 0 {
+				return interpreter.Heap.ParamPrimitiveArray(baseTy)
+			}
+			return interpreter.Heap.ParamComplexArray(dim, baseTy)
 		}
 
 		// *T (указатель на примитив/строку)
 		if p, ok := v.Type().Underlying().(*types.Pointer); ok {
+			// *struct уже поймали выше в structMeta
 			elemTy := goTypeToSym(p.Elem())
-			return interpreter.Heap.ParamRef(v.Name(), elemTy)
+			return interpreter.Heap.Param(elemTy) // адрес
 		}
 
-		// обычные примитивы
+		// обычный примитив как value: создаём адрес + читаем значение
 		ty := goTypeToSym(v.Type())
-		ref := interpreter.Heap.ParamRef(v.Name(), ty)
+		ref := interpreter.Heap.Param(ty)
 		return interpreter.Heap.GetValue(ref)
 
 	/*
-		The Alloc instruction:
-		1. reserves space for a variable of the given type,
-		2. zero-initializes it, TODO??? (In my case its z3.Value and solver decide which value it is when no assertations)
-		3. yields its address.
-
-		Alloc values are always addresses, and have pointer types, so the
-		type of the allocated variable is actually
-		Type().Underlying().(*types.Pointer).Elem().
+		Alloc:
+		- всегда возвращает адрес (Ref).
 	*/
 	case *ssa.Alloc:
-		var res symbolic.SymbolicExpression
-
 		// struct / *struct
 		if typeName, fields, ok := structMeta(v.Type()); ok {
-			res = interpreter.Heap.AllocateStruct(typeName, fields)
-			interpreter.Env[v] = res
-			return res
+			r := interpreter.Heap.AllocateStruct(typeName, fields)
+			interpreter.Env[v] = r
+			return r
 		}
 
-		// []T
-		if sl, ok := v.Type().Underlying().(*types.Slice); ok {
-			elemTy := goTypeToSym(sl.Elem())
-			res = interpreter.Heap.AllocateArray(elemTy)
-			interpreter.Env[v] = res
-			return res
+		// []T / [][]T ...
+		if depth, base, ok := sliceDepthBase(v.Type()); ok {
+			if typeName, fields, ok2 := structMeta(base); ok2 {
+				if depth != 1 {
+					panic("Alloc: multidimensional array of structs is not supported")
+				}
+				r := interpreter.Heap.AllocateStructsArray(0, typeName, fields)
+				interpreter.Env[v] = r
+				return r
+			}
+
+			baseTy := goTypeToSym(base)
+			dim := depth - 1
+			if dim == 0 {
+				r := interpreter.Heap.AllocatePrimitiveArray(baseTy)
+				interpreter.Env[v] = r
+				return r
+			}
+			r := interpreter.Heap.AllocateComplexArray(dim, baseTy)
+			interpreter.Env[v] = r
+			return r
 		}
 
-		// pointer/array-like (твой текущий хак)
+		// pointer alloc: тип = *T
 		if p, ok := v.Type().Underlying().(*types.Pointer); ok {
-			elemTy := goTypeToSym(p.Elem())
-			res = interpreter.Heap.AllocateArray(elemTy)
-			interpreter.Env[v] = res
-			return res
+			if typeName, fields, ok2 := structMeta(p.Elem()); ok2 {
+				r := interpreter.Heap.AllocateStruct(typeName, fields)
+				interpreter.Env[v] = r
+				return r
+			}
+			ty := goTypeToSym(p.Elem())
+			r := interpreter.Heap.Allocate(ty)
+			interpreter.Env[v] = r
+			return r
 		}
 
-		// Primitive
+		// примитив
 		ty := goTypeToSym(v.Type())
-		ref := interpreter.Heap.Allocate(ty)
-		res = interpreter.Heap.GetValue(ref)
+		r := interpreter.Heap.Allocate(ty)
+		interpreter.Env[v] = r
+		return r
 
+	/*
+		Slice(X[low:high]) — пока хак: просто возвращаем X
+	*/
+	case *ssa.Slice:
+		res := interpreter.resolveExpression(v.X)
 		interpreter.Env[v] = res
 		return res
 
 	/*
-		The Slice instruction yields a slice of an existing string, slice
-		or *array X between optional integer bounds Low and High.
-
-		Type() returns string if the type of X was string, otherwise a
-		*types.Slice with the same element type as X.
+		MakeSlice: создаём новый массив/слайс
 	*/
-	case *ssa.Slice:
-		res := interpreter.resolveExpression(v.X) // TODO Support slices
-		interpreter.Env[v] = res
-		return res
-
 	case *ssa.MakeSlice:
-		sl, ok := v.Type().Underlying().(*types.Slice)
+		depth, base, ok := sliceDepthBase(v.Type())
 		if !ok {
 			panic(fmt.Sprintf("MakeSlice: unexpected type %T (%s)", v.Type().Underlying(), v.Type().String()))
 		}
 
-		if typeName, fields, ok := structMeta(sl.Elem()); ok {
-			res := interpreter.Heap.AllocateArrayStruct(typeName, fields)
-			interpreter.Env[v] = res
-			return res
+		if typeName, fields, ok2 := structMeta(base); ok2 {
+			if depth != 1 {
+				panic("MakeSlice: multidimensional array of structs is not supported")
+			}
+			r := interpreter.Heap.AllocateStructsArray(0, typeName, fields)
+			interpreter.Env[v] = r
+			return r
 		}
 
-		elemTy := goTypeToSym(sl.Elem())
-		res := interpreter.Heap.AllocateArray(elemTy)
-		interpreter.Env[v] = res
-		return res
+		baseTy := goTypeToSym(base)
+		dim := depth - 1
+		if dim == 0 {
+			r := interpreter.Heap.AllocatePrimitiveArray(baseTy)
+			interpreter.Env[v] = r
+			return r
+		}
+		r := interpreter.Heap.AllocateComplexArray(dim, baseTy)
+		interpreter.Env[v] = r
+		return r
 
-	// IntConstant, BoolConstant, StringConstant
+	// Константы
 	case *ssa.Const:
 		if v.Value == nil {
 			panic("unsupported nil value")
@@ -290,16 +327,10 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 			return symbolic.NewStringConstant(constant.StringVal(v.Value))
 
 		default:
-			panic(fmt.Sprintf("unsupported value %T", v.Value.Kind()))
+			panic(fmt.Sprintf("unsupported const kind: %v", v.Value.Kind()))
 		}
 
 	// X Op Y
-	/*
-		One of:
-		ADD SUB MUL QUO REM          + - * / %
-		AND OR XOR SHL SHR AND_NOT   & | ^ << >> &^
-		EQL NEQ LSS LEQ GTR GEQ      == != < <= < >=
-	*/
 	case *ssa.BinOp:
 		l := interpreter.resolveExpression(v.X)
 		r := interpreter.resolveExpression(v.Y)
@@ -308,27 +339,25 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 			return symbolic.NewBinaryOperation(l, r, sop)
 		}
 
+		// fallback
 		return symbolic.NewSymbolicVariable(v.Name(), goTypeToSym(v.Type()))
 
 	// Op X
-	/*
-		One of:
-		NOT SUB ARROW MUL XOR ! - <- * ^
-	*/
 	case *ssa.UnOp:
-		// 1) СНАЧАЛА special-case для load: *X
+		// special-case load: *X
 		if v.Op == token.MUL {
-			// &foo2.a
+			// *(&obj.field)
 			if fa, ok := v.X.(*ssa.FieldAddr); ok {
-				base := interpreter.resolveExpression(fa.X) // fa.X = foo2
+				base := interpreter.resolveExpression(fa.X)
 				br, ok := base.(*symbolic.Ref)
 				if !ok {
 					panic(fmt.Sprintf("Load: FieldAddr base is %T, want *symbolic.Ref", base))
 				}
-				return interpreter.Heap.GetFieldValue(br, fa.Field)
+				fr := interpreter.Heap.FieldAddress(br, fa.Field)
+				return interpreter.Heap.GetValue(fr)
 			}
 
-			// &foo2[Index]
+			// *(&arr[i])
 			if ia, ok := v.X.(*ssa.IndexAddr); ok {
 				base := interpreter.resolveExpression(ia.X)
 				br, ok := base.(*symbolic.Ref)
@@ -340,10 +369,13 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 				if idxExpr.Type() != symbolic.IntType {
 					panic(fmt.Sprintf("Load: Index must be int, got %T (%s)", idxExpr, idxExpr.String()))
 				}
+				fmt.Printf("IndexAddr: base=%s, baseRefType=%s, dim=%d, baseType=%s\n",
+					br.String(), br.RefType.String(), br.ArrayDimension, br.ArrayBaseType.String())
+
 				return interpreter.Heap.GetFromArray(br, idxExpr)
 			}
 
-			// Primitive ref
+			// *ref (примитив или field-ref)
 			addrExpr := interpreter.resolveExpression(v.X)
 			r, ok := addrExpr.(*symbolic.Ref)
 			if !ok {
@@ -352,7 +384,6 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 			return interpreter.Heap.GetValue(r)
 		}
 
-		// 2) ТОЛЬКО ПОТОМ резолвим операнд для остальных унарных операций
 		operand := interpreter.resolveExpression(v.X)
 
 		if sop, ok := tokenToUnOp(v.Op); ok {
@@ -361,12 +392,10 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 
 		return symbolic.NewSymbolicVariable(v.Name(), goTypeToSym(v.Type()))
 
-	// The Call instruction represents a function or method call.
 	case *ssa.Call:
 		panic("Implement me HW5!")
 
 	default:
-		// fallback: просто символ по имени SSA value
 		panic(fmt.Sprintf("Support me! %T", v))
 	}
 }
@@ -410,7 +439,7 @@ func tokenToBinOp(op token.Token) (symbolic.BinaryOperator, bool) {
 	case token.GEQ:
 		return symbolic.GE, true
 	default:
-		panic("Not impl!")
+		return 0, false
 	}
 }
 
@@ -423,14 +452,13 @@ func tokenToUnOp(op token.Token) (symbolic.UnaryOperator, bool) {
 	case token.XOR:
 		return symbolic.UXOR, true
 	default:
-		panic(fmt.Sprintf("Not impl! %s", op.String()))
+		return 0, false
 	}
 }
 
-// TODO Внести всю логику выведения типов в эту функцию и не размазывать по интерпретатору
 func goTypeToSym(t types.Type) symbolic.ExpressionType {
 	if t == nil {
-		panic("nil")
+		panic("nil type")
 	}
 
 	switch tt := t.Underlying().(type) {
@@ -450,10 +478,10 @@ func goTypeToSym(t types.Type) symbolic.ExpressionType {
 	case *types.Array:
 		return goTypeToSym(tt.Elem())
 	default:
-		panic(fmt.Sprintf("Not impl: %T\n", tt))
+		panic(fmt.Sprintf("goTypeToSym: not impl: %T (%s)", tt, t.String()))
 	}
 
-	panic(fmt.Sprintf("Not impl: %T\n", t))
+	panic(fmt.Sprintf("goTypeToSym: not impl: %T (%s)", t, t.String()))
 }
 
 func nextInSameBlock(st Interpreter, block *ssa.BasicBlock, instrIdx int, pred *ssa.BasicBlock) []*Item {
@@ -483,6 +511,39 @@ func pickPhiEdge(phi *ssa.Phi, block *ssa.BasicBlock, pred *ssa.BasicBlock) (ssa
 	return nil, false
 }
 
+// sliceDepthBase: извлекаем глубину слайса и базовый тип.
+//
+// []T      => depth=1, base=T
+// [][]T    => depth=2, base=T
+// [][][]T  => depth=3, base=T
+//
+// Указатели сверху снимаем: *[][]T тоже ок.
+func sliceDepthBase(t types.Type) (depth int, base types.Type, ok bool) {
+	for {
+		if p, isPtr := t.(*types.Pointer); isPtr {
+			t = p.Elem()
+			continue
+		}
+		break
+	}
+
+	for {
+		sl, isSlice := t.Underlying().(*types.Slice)
+		if !isSlice {
+			break
+		}
+		depth++
+		t = sl.Elem()
+	}
+
+	if depth == 0 {
+		return 0, nil, false
+	}
+	return depth, t, true
+}
+
+// structMeta: возвращает имя структуры и типы полей (символьные).
+// Разворачивает указатели и named-типы.
 func structMeta(t types.Type) (typeName string, fieldTypes []symbolic.ExpressionType, ok bool) {
 	for {
 		if p, isPtr := t.(*types.Pointer); isPtr {
@@ -494,7 +555,6 @@ func structMeta(t types.Type) (typeName string, fieldTypes []symbolic.Expression
 
 	if n, isNamed := t.(*types.Named); isNamed {
 		typeName = n.Obj().Name()
-
 		t = n.Underlying()
 	}
 
@@ -512,6 +572,5 @@ func structMeta(t types.Type) (typeName string, fieldTypes []symbolic.Expression
 	if typeName == "" {
 		typeName = "anon_struct"
 	}
-
 	return typeName, fieldTypes, true
 }

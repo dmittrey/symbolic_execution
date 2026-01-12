@@ -3,7 +3,6 @@ package internal
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	"symbolic-execution-course/internal/memory"
@@ -15,12 +14,13 @@ func (st Interpreter) Dump() string {
 
 	fmt.Fprintf(&b, "Interpreter{\n")
 	fmt.Fprintf(&b, "  PC: %s\n", safeExpr(st.PathCondition))
+
 	fmt.Fprintf(&b, "  ReturnResults:\n")
 	for idx, val := range st.ReturnResults {
-		fmt.Fprintf(&b, "    [%d] %s\n", idx, val.String())
+		fmt.Fprintf(&b, "    [%d] %s\n", idx, safeExpr(val))
 	}
-	fmt.Fprintf(&b, "  CallStack: %d frame(s)\n", len(st.CallStack))
 
+	fmt.Fprintf(&b, "  CallStack: %d frame(s)\n", len(st.CallStack))
 	for i, fr := range st.CallStack {
 		fnName := "<nil>"
 		if fr.Function != nil {
@@ -52,21 +52,14 @@ func (st Interpreter) Dump() string {
 	switch mem := st.Heap.(type) {
 	case *memory.SymbolicMemory:
 		fmt.Fprintf(&b, "  Heap: SymbolicMemory{\n")
-		fmt.Fprintf(&b, "    LastIdx: %d\n", mem.LastIdx)
+		fmt.Fprintf(&b, "    LastRefIdx: %d\n", mem.LastRefIdx)
 		fmt.Fprintf(&b, "    Params: %d, Allocations: %d\n", len(mem.Params), len(mem.Allocations))
 
 		// Params list
 		if len(mem.Params) > 0 {
 			fmt.Fprintf(&b, "    ParamsList:\n")
 			for i, r := range mem.Params {
-				if r.RefType == symbolic.ArrayType {
-					elem := r.ElemType
-					fmt.Fprintf(&b, "      P[%d]: %s (refType=%s, elem=%s)\n",
-						i, r.String(), r.RefType.String(), elem.String())
-				} else {
-					fmt.Fprintf(&b, "      P[%d]: %s (refType=%s)\n",
-						i, r.String(), r.RefType.String())
-				}
+				fmt.Fprintf(&b, "      P[%d]: %s\n", i, dumpRef(r))
 			}
 		}
 
@@ -74,114 +67,42 @@ func (st Interpreter) Dump() string {
 		if len(mem.Allocations) > 0 {
 			fmt.Fprintf(&b, "    AllocationsList:\n")
 			for i, r := range mem.Allocations {
-				if r.RefType == symbolic.ArrayType {
-					elem := r.ElemType
-					fmt.Fprintf(&b, "      A[%d]: %s (refType=%s, elem=%s)\n",
-						i, r.String(), r.RefType.String(), elem.String())
-				} else {
-					fmt.Fprintf(&b, "      A[%d]: %s (refType=%s)\n",
-						i, r.String(), r.RefType.String())
+				fmt.Fprintf(&b, "      A[%d]: %s\n", i, dumpRef(r))
+			}
+		}
+
+		// Core segments
+		fmt.Fprintf(&b, "    IntSegment:    %s\n", dumpArray(&mem.IntSegment, 30))
+		fmt.Fprintf(&b, "    BoolSegment:   %s\n", dumpArray(&mem.BoolSegment, 30))
+		fmt.Fprintf(&b, "    StringSegment: %s\n", dumpArray(&mem.StringSegment, 30))
+		fmt.Fprintf(&b, "    ArraySegment:  %s\n", dumpArray(&mem.ArraySegment, 30))
+
+		// Struct segments
+		if len(mem.StructSegments) == 0 {
+			fmt.Fprintf(&b, "    StructSegments: <empty>\n")
+		} else {
+			typeNames := make([]string, 0, len(mem.StructSegments))
+			for tn := range mem.StructSegments {
+				typeNames = append(typeNames, tn)
+			}
+			sort.Strings(typeNames)
+
+			fmt.Fprintf(&b, "    StructSegments: %d type(s)\n", len(typeNames))
+			for _, tn := range typeNames {
+				fields := mem.StructSegments[tn]
+
+				// stable field order: 0..n-1 (если дырки — сортируем ключи)
+				fieldIdxs := make([]int, 0, len(fields))
+				for idx := range fields {
+					fieldIdxs = append(fieldIdxs, idx)
+				}
+				sort.Ints(fieldIdxs)
+
+				fmt.Fprintf(&b, "      %s:\n", tn)
+				for _, fi := range fieldIdxs {
+					fmt.Fprintf(&b, "        field[%d]: %s\n", fi, dumpArray(fields[fi], 30))
 				}
 			}
-		}
-
-		// ParamNameToRef map (stable order)
-		if len(mem.ParamNameToRef) > 0 {
-			names := make([]string, 0, len(mem.ParamNameToRef))
-			for k := range mem.ParamNameToRef {
-				names = append(names, k)
-			}
-			sort.Strings(names)
-
-			fmt.Fprintf(&b, "    ParamNameToRef:\n")
-			for _, name := range names {
-				r := mem.ParamNameToRef[name]
-				fmt.Fprintf(&b, "      %s -> %s (refType=%s)\n", name, r.String(), r.RefType.String())
-			}
-		}
-
-		// Segments with stores
-		fmt.Fprintf(&b, "    IntSegment: %s\n", dumpArray(mem.IntSegment, 20))
-		fmt.Fprintf(&b, "    BoolSegment: %s\n", dumpArray(mem.BoolSegment, 20))
-
-		// ArraysSegment (stable order by key)
-		if len(mem.ArraysSegment) == 0 {
-			fmt.Fprintf(&b, "    ArraysSegment: <empty>\n")
-		} else {
-			keys := make([]string, 0, len(mem.ArraysSegment))
-			for k := range mem.ArraysSegment {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-
-			fmt.Fprintf(&b, "    ArraysSegment: %d key(s)\n", len(keys))
-			for _, k := range keys {
-				arr := mem.ArraysSegment[k]
-				fmt.Fprintf(&b, "      key=%s: %s\n", k, dumpArray(arr, 20))
-			}
-		}
-
-		// ----- StructTypes / RefToTypeIdx detailed dump -----
-		if len(mem.TypeToInt) > 0 {
-			// typeIdx -> name (для расшифровки RefToTypeIdx)
-			idxToName := make(map[int]string, len(mem.TypeToInt))
-
-			names := make([]string, 0, len(mem.TypeToInt))
-			for name := range mem.TypeToInt {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-
-			fmt.Fprintf(&b, "    StructTypes: %d\n", len(names))
-			for _, name := range names {
-				idx := mem.TypeToInt[name]
-				idxToName[idx] = name
-				fmt.Fprintf(&b, "      T[%d]: %s\n", idx, name)
-			}
-
-			// RefToTypeIdx: map[string]int ("addr_0" -> typeIdx)
-			// if len(mem.RefToTypeIdx) > 0 {
-			// 	keys := make([]string, 0, len(mem.RefToTypeIdx))
-			// 	for k := range mem.RefToTypeIdx {
-			// 		keys = append(keys, k)
-			// 	}
-
-			// 	sort.Slice(keys, func(i, j int) bool {
-			// 		return addrKeyOrder(keys[i]) < addrKeyOrder(keys[j])
-			// 	})
-
-			// 	fmt.Fprintf(&b, "    RefToTypeIdx: %d\n", len(keys))
-			// 	for _, k := range keys {
-			// 		typeIdx := mem.RefToTypeIdx[k]
-			// 		typeName := idxToName[typeIdx]
-			// 		if typeName == "" {
-			// 			typeName = "<unknown>"
-			// 		}
-			// 		// k = "addr_N" → печатаем "&addr_N"
-			// 		fmt.Fprintf(&b, "      &%s -> T[%d] (%s)\n", k, typeIdx, typeName)
-			// 	}
-			// } else {
-			// 	fmt.Fprintf(&b, "    RefToTypeIdx: <empty>\n")
-			// }
-		} else {
-			// на всякий случай: типы пустые, но ссылки есть
-			// if len(mem.RefToTypeIdx) > 0 {
-			// 	fmt.Fprintf(&b, "    StructTypes: <empty>\n")
-
-			// 	keys := make([]string, 0, len(mem.RefToTypeIdx))
-			// 	for k := range mem.RefToTypeIdx {
-			// 		keys = append(keys, k)
-			// 	}
-
-			// 	sort.Slice(keys, func(i, j int) bool {
-			// 		return addrKeyOrder(keys[i]) < addrKeyOrder(keys[j])
-			// 	})
-
-			// 	fmt.Fprintf(&b, "    RefToTypeIdx: %d\n", len(keys))
-			// 	for _, k := range keys {
-			// 		fmt.Fprintf(&b, "      &%s -> T[%d]\n", k, mem.RefToTypeIdx[k])
-			// 	}
-			// }
 		}
 
 		fmt.Fprintf(&b, "  }\n")
@@ -203,28 +124,77 @@ func (st Interpreter) Dump() string {
 	return b.String()
 }
 
+func dumpRef(r *symbolic.Ref) string {
+	if r == nil {
+		return "<nil ref>"
+	}
+
+	switch r.RefType {
+	case symbolic.ArrayType:
+		// ArrayDimension: 0 => "T[]" (примитивный/структурный массив)
+		// ArrayDimension: 1 => "T[][]" (и т.д.)
+		dim := r.ArrayDimension
+		base := r.ArrayBaseType.String()
+
+		// Если массив структур — напечатаем имя типа
+		if r.ArrayBaseType == symbolic.StructType && r.StructTypeName != "" {
+			base = fmt.Sprintf("struct(%s)", r.StructTypeName)
+		}
+
+		return fmt.Sprintf("%s (refType=array, dim=%d, base=%s)", r.String(), dim, base)
+
+	case symbolic.StructType:
+		// Поле может быть ещё не выбранным (StructFieldIdx=-1)
+		if r.StructTypeName == "" {
+			return fmt.Sprintf("%s (refType=struct, type=<unset>, field=%d)", r.String(), r.StructFieldIdx)
+		}
+		return fmt.Sprintf("%s (refType=struct, type=%s, field=%d)", r.String(), r.StructTypeName, r.StructFieldIdx)
+
+	default:
+		return fmt.Sprintf("%s (refType=%s)", r.String(), r.RefType.String())
+	}
+}
+
 func dumpArray(a *symbolic.Array, limit int) string {
 	if a == nil {
 		return "<nil>"
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s (elem=%s, stores=%d)", a.Name, a.ValType.String(), len(a.Stores))
+	// посчитаем типы операций
+	var stores, selects int
+	for _, op := range a.Ops {
+		switch op.Kind {
+		case symbolic.OpStore:
+			stores++
+		case symbolic.OpSelect:
+			selects++
+		}
+	}
 
-	if len(a.Stores) == 0 {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s (elem=%s, ops=%d, store=%d, select=%d)", a.Name, a.ElemType.String(), len(a.Ops), stores, selects)
+
+	if len(a.Ops) == 0 {
 		return b.String()
 	}
 
-	// печатаем последние `limit` store-ов (удобно для циклов)
 	start := 0
-	if limit > 0 && len(a.Stores) > limit {
-		start = len(a.Stores) - limit
+	if limit > 0 && len(a.Ops) > limit {
+		start = len(a.Ops) - limit
 		fmt.Fprintf(&b, " [showing last %d]", limit)
 	}
 
-	for i := start; i < len(a.Stores); i++ {
-		st := a.Stores[i]
-		fmt.Fprintf(&b, "\n        store[%d]: idx=%s, val=%s", i, safeExpr(st.Idx), safeExpr(st.Val))
+	for i := start; i < len(a.Ops); i++ {
+		op := a.Ops[i]
+		switch op.Kind {
+		case symbolic.OpStore:
+			fmt.Fprintf(&b, "\n        op[%d]: store idx=%s, val=%s", i, safeExpr(op.Idx), safeExpr(op.Val))
+		case symbolic.OpSelect:
+			// op.Val — это "результат чтения" (символьная переменная)
+			fmt.Fprintf(&b, "\n        op[%d]: select idx=%s, res=%s", i, safeExpr(op.Idx), safeExpr(op.Val))
+		default:
+			fmt.Fprintf(&b, "\n        op[%d]: <unknown-op> idx=%s, val=%s", i, safeExpr(op.Idx), safeExpr(op.Val))
+		}
 	}
 
 	return b.String()
@@ -235,27 +205,4 @@ func safeExpr(e symbolic.SymbolicExpression) string {
 		return "<nil>"
 	}
 	return e.String()
-}
-
-func addrVarOrderKey(v *symbolic.SymbolicVariable) int {
-	if v == nil {
-		return 1 << 30
-	}
-	s := v.Name // ожидаем "addr_N"
-	s = strings.TrimPrefix(s, "addr_")
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return 1 << 30
-	}
-	return n
-}
-
-func addrKeyOrder(k string) int {
-	// ожидаем "addr_N"
-	s := strings.TrimPrefix(k, "addr_")
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return 1 << 30
-	}
-	return n
 }

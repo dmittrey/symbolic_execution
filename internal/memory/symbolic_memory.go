@@ -11,7 +11,7 @@ type Memory interface {
 	Param(tp symbolic.ExpressionType) *symbolic.Ref
 	ParamStruct(structTypeName string, fieldTypes []symbolic.ExpressionType) *symbolic.Ref
 	ParamPrimitiveArray(baseType symbolic.ExpressionType) *symbolic.Ref
-	ParamComplexArray(baseType symbolic.ExpressionType) *symbolic.Ref
+	ParamComplexArray(dimension int, baseType symbolic.ExpressionType) *symbolic.Ref
 	ParamStructsArray(dimension int, structName string, fieldTypes []symbolic.ExpressionType) *symbolic.Ref
 
 	// Primitives
@@ -249,19 +249,44 @@ func (mem *SymbolicMemory) GetFromArray(ref *symbolic.Ref, index symbolic.Symbol
 			Idx:            objAddr,
 			RefType:        symbolic.StructType,
 			StructTypeName: ref.StructTypeName,
+			StructFieldIdx: -1,
 		}
 	default:
 		panic("unknown base type")
 	}
 }
 
+func (mem *SymbolicMemory) AllocateStruct(structTypeName string, fieldTypes []symbolic.ExpressionType) *symbolic.Ref {
+	mem.registerStructType(structTypeName, fieldTypes)
+
+	r := symbolic.NewRef(mem.nextId(), symbolic.StructType)
+	r.StructTypeName = structTypeName
+	r.StructFieldIdx = -1
+
+	mem.Allocations = append(mem.Allocations, r)
+	return r
+}
+
 func (mem *SymbolicMemory) FieldAddress(ref *symbolic.Ref, fieldIdx int) *symbolic.Ref {
+	if ref == nil {
+		panic("FieldAddress: nil ref")
+	}
+	if ref.RefType != symbolic.StructType {
+		panic("FieldAddress: ref is not struct")
+	}
+	if ref.StructTypeName == "" {
+		panic("FieldAddress: empty struct type name")
+	}
 	if mem.StructSegments[ref.StructTypeName] == nil {
-		panic("Not found type in indexing types")
+		panic("FieldAddress: struct type is not registered")
+	}
+	if mem.StructSegments[ref.StructTypeName][fieldIdx] == nil {
+		panic("FieldAddress: field segment is not registered")
 	}
 
-	ref.StructFieldIdx = fieldIdx
-	return ref
+	cp := *ref
+	cp.StructFieldIdx = fieldIdx
+	return &cp
 }
 
 func (mem *SymbolicMemory) Constraints() []symbolic.SymbolicExpression {
