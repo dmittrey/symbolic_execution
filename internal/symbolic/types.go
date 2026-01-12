@@ -1,4 +1,3 @@
-// Package symbolic определяет базовые типы символьных выражений
 package symbolic
 
 // ExpressionType представляет тип символьного выражения
@@ -8,9 +7,15 @@ const (
 	IntType ExpressionType = iota
 	BoolType
 	StringType
-	ArrayType
+	FloatType
 	StructType
 	RefType
+
+	// Arrays
+	ArrayType
+
+	// Forbid type
+	NONE
 )
 
 // String возвращает строковое представление типа
@@ -22,11 +27,43 @@ func (et ExpressionType) String() string {
 		return "bool"
 	case StringType:
 		return "string"
-	case ArrayType:
-		return "array"
+	case FloatType:
+		return "float"
 	case StructType:
 		return "struct"
+	case RefType:
+		return "ref"
+	case ArrayType:
+		return "array"
 	default:
 		return "unknown"
 	}
+}
+
+// Базовый интерфейс для всех символьных выражений
+type SymbolicExpression interface {
+	// Expression type
+	Type() ExpressionType
+
+	// String represenation
+	String() string
+
+	// Name
+	ExprName() string
+
+	// Visitor
+	Accept(visitor Visitor) interface{}
+}
+
+// Многомерный массив
+type ArrayExpression interface {
+	SymbolicExpression
+
+	// Ops
+	Access(idx SymbolicExpression) SymbolicExpression
+	Store(idx SymbolicExpression, val SymbolicExpression)
+
+	// Info
+	Dimension() int
+	BaseType() ExpressionType
 }

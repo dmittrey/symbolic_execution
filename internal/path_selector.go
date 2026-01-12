@@ -6,8 +6,17 @@ type PathSelector interface {
 	CalculatePriority(interpreter Interpreter) int
 }
 
+const (
+	MaxInt = int(^uint(0) >> 1)
+	MinInt = -MaxInt - 1
+)
+
 type DfsPathSelector struct {
-	counter int // int.min_value
+	counter int
+}
+
+func NewDfsPathSelector() *DfsPathSelector {
+	return &DfsPathSelector{counter: MinInt}
 }
 
 func (dfs *DfsPathSelector) CalculatePriority(interpreter Interpreter) int {
@@ -16,7 +25,11 @@ func (dfs *DfsPathSelector) CalculatePriority(interpreter Interpreter) int {
 }
 
 type BfsPathSelector struct {
-	counter int // int.max_value
+	counter int
+}
+
+func NewBfsPathSelector() *BfsPathSelector {
+	return &BfsPathSelector{counter: MaxInt}
 }
 
 func (bfs *BfsPathSelector) CalculatePriority(interpreter Interpreter) int {
@@ -25,6 +38,8 @@ func (bfs *BfsPathSelector) CalculatePriority(interpreter Interpreter) int {
 }
 
 type RandomPathSelector struct{}
+
+func NewRandomPathSelector() *RandomPathSelector { return &RandomPathSelector{} }
 
 func (random *RandomPathSelector) CalculatePriority(interpreter Interpreter) int {
 	return rand.Int()

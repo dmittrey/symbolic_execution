@@ -1,11 +1,23 @@
 package internal
 
-import "container/heap"
+import (
+	"golang.org/x/tools/go/ssa"
+)
+
+type LocKey struct {
+	Block   int
+	InstrIx int
+}
 
 type Item struct {
 	value    Interpreter
+	block    *ssa.BasicBlock
+	pred     *ssa.BasicBlock // Нужен для ssa.Phi
+	instrIdx int
 	priority int
 	index    int
+
+	visits map[LocKey]uint8 // <-- добавили
 }
 
 type PriorityQueue []*Item
@@ -37,10 +49,4 @@ func (pq *PriorityQueue) Pop() interface{} {
 	item.index = -1
 	*pq = old[0 : n-1]
 	return item
-}
-
-func (pq *PriorityQueue) update(item *Item, value Interpreter, priority int) {
-	item.value = value
-	item.priority = priority
-	heap.Fix(pq, item.index)
 }

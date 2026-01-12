@@ -6,10 +6,12 @@ type Visitor interface {
 	VisitIntConstant(expr *IntConstant) interface{}
 	VisitBoolConstant(expr *BoolConstant) interface{}
 	VisitBinaryOperation(expr *BinaryOperation) interface{}
-	VisitLogicalOperation(expr *LogicalOperation) interface{}
-	VisitFunctionCall(expr *FunctionCall) interface{}
+	VisitUnaryOperation(expr *UnaryOperation) interface{}
 	VisitConditionalExpression(expr *ConditionalExpression) interface{}
-	VisitArray(expr *Array) interface{}
-	VisitArrayAccess(expr *ArrayAccess) interface{}
 	VisitStringConstant(*StringConstant) interface{}
+	VisitFloatConstant(expr *FloatConstant) interface{}
+	VisitRef(r *Ref) interface{}
+
+	// Arrays
+	VisitArray(expr *Array) interface{}
 }
