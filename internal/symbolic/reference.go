@@ -9,6 +9,7 @@ type Ref struct {
 	// ArrayRef info
 	ArrayDimension int
 	ArrayBaseType  ExpressionType
+	ArrayElemIdx   SymbolicExpression
 
 	// StructRef info
 	StructTypeName string
@@ -21,7 +22,21 @@ func NewRef(idx int64, refType ExpressionType) *Ref {
 		RefType: refType,
 
 		ArrayDimension: -1,
-		ArrayBaseType:  NONE,
+		ArrayBaseType:  ForbiddenType,
+		ArrayElemIdx:   nil,
+
+		StructTypeName: "",
+		StructFieldIdx: -1,
+	}
+}
+func NewRefFromExpr(idx SymbolicExpression, refType ExpressionType) *Ref {
+	return &Ref{
+		Idx:     idx,
+		RefType: refType,
+
+		ArrayDimension: -1,
+		ArrayBaseType:  ForbiddenType,
+		ArrayElemIdx:   nil,
 
 		StructTypeName: "",
 		StructFieldIdx: -1,
@@ -34,6 +49,7 @@ func NewArrayRef(idx int64, dimension int, baseType ExpressionType) *Ref {
 
 		ArrayDimension: dimension,
 		ArrayBaseType:  baseType,
+		ArrayElemIdx:   nil,
 
 		StructTypeName: "",
 		StructFieldIdx: -1,
@@ -46,21 +62,36 @@ func NewArrayRefFromExpr(idx SymbolicExpression, dimension int, baseType Express
 
 		ArrayDimension: dimension,
 		ArrayBaseType:  baseType,
+		ArrayElemIdx:   nil,
 
 		StructTypeName: "",
 		StructFieldIdx: -1,
 	}
 }
-func NewStructRef(idx int64, typeName string, fieldIdx int) *Ref {
+func NewStructRef(idx int64, structTypeName string) *Ref {
 	return &Ref{
 		Idx:     NewSymbolicVariable(fmt.Sprintf("addr_%d", idx), IntType),
 		RefType: StructType,
 
 		ArrayDimension: -1,
-		ArrayBaseType:  NONE,
+		ArrayBaseType:  ForbiddenType,
+		ArrayElemIdx:   nil,
 
-		StructTypeName: typeName,
-		StructFieldIdx: fieldIdx,
+		StructTypeName: structTypeName,
+		StructFieldIdx: -1,
+	}
+}
+func NewStructRefFromExpr(idx SymbolicExpression, structTypeName string) *Ref {
+	return &Ref{
+		Idx:     idx,
+		RefType: StructType,
+
+		ArrayDimension: -1,
+		ArrayBaseType:  ForbiddenType,
+		ArrayElemIdx:   nil,
+
+		StructTypeName: structTypeName,
+		StructFieldIdx: -1,
 	}
 }
 
