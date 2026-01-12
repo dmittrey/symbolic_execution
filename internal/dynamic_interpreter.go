@@ -5,6 +5,8 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"reflect"
+	"unsafe"
 
 	"symbolic-execution-course/internal/memory"
 	"symbolic-execution-course/internal/symbolic"
@@ -136,8 +138,16 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 
 	case *ssa.Jump:
 		out := make([]*Item, 0, len(block.Succs))
+		if len(block.Succs) <= 1 {
+			for _, s := range block.Succs {
+				out = append(out, &Item{value: *interpreter, block: s, instrIdx: 0, pred: block})
+			}
+			return out
+		}
+
 		for _, s := range block.Succs {
-			out = append(out, &Item{value: *interpreter, block: s, instrIdx: 0, pred: block})
+			st := interpreter.cloneMapsOnly()
+			out = append(out, &Item{value: st, block: s, instrIdx: 0, pred: block})
 		}
 		return out
 
@@ -584,9 +594,19 @@ func nextInSameBlock(st Interpreter, block *ssa.BasicBlock, instrIdx int, pred *
 	if nxt < len(block.Instrs) {
 		return []*Item{{value: st, block: block, instrIdx: nxt, pred: pred}}
 	}
+
 	out := make([]*Item, 0, len(block.Succs))
+	if len(block.Succs) <= 1 {
+		for _, s := range block.Succs {
+			out = append(out, &Item{value: st, block: s, instrIdx: 0, pred: block})
+		}
+		return out
+	}
+
 	for _, s := range block.Succs {
-		out = append(out, &Item{value: st, block: s, instrIdx: 0, pred: block})
+		cp := st
+		cloned := (&cp).cloneMapsOnly()
+		out = append(out, &Item{value: cloned, block: s, instrIdx: 0, pred: block})
 	}
 	return out
 }
@@ -961,5 +981,130 @@ func (it *Interpreter) cloneMapsOnly() Interpreter {
 		cp.paramRef[k] = v
 	}
 
+	if it.CallStack != nil {
+		cp.CallStack = make([]CallStackFrame, len(it.CallStack))
+		for i := range it.CallStack {
+			cp.CallStack[i].Function = it.CallStack[i].Function
+			cp.CallStack[i].ReturnValue = it.CallStack[i].ReturnValue
+
+			if it.CallStack[i].LocalMemory != nil {
+				cp.CallStack[i].LocalMemory = make(map[string]symbolic.SymbolicExpression, len(it.CallStack[i].LocalMemory))
+				for k, v := range it.CallStack[i].LocalMemory {
+					cp.CallStack[i].LocalMemory[k] = v
+				}
+			} else {
+				cp.CallStack[i].LocalMemory = nil
+			}
+		}
+	} else {
+		cp.CallStack = nil
+	}
+
+	cp.Heap = cloneHeap(it.Heap)
+
 	return cp
+}
+
+func cloneHeap(h memory.Memory) memory.Memory {
+	if h == nil {
+		return nil
+	}
+	sm, ok := h.(*memory.SymbolicMemory)
+	if !ok {
+		panic(fmt.Sprintf("cloneHeap: unsupported heap type %T", h))
+	}
+	return deepCopyAny[*memory.SymbolicMemory](sm)
+}
+
+func deepCopyAny[T any](in T) T {
+	v := reflect.ValueOf(in)
+	if !v.IsValid() {
+		return in
+	}
+	cp := deepCopyValue(v, make(map[uintptr]reflect.Value))
+	return cp.Interface().(T)
+}
+
+func deepCopyValue(v reflect.Value, memo map[uintptr]reflect.Value) reflect.Value {
+	if !v.IsValid() {
+		return v
+	}
+
+	switch v.Kind() {
+	case reflect.Pointer:
+		if v.IsNil() {
+			return reflect.Zero(v.Type())
+		}
+		ptr := v.Pointer()
+		if got, ok := memo[ptr]; ok {
+			return got
+		}
+		nv := reflect.New(v.Elem().Type())
+		memo[ptr] = nv
+		nv.Elem().Set(deepCopyValue(v.Elem(), memo))
+		return nv
+
+	case reflect.Interface:
+		if v.IsNil() {
+			return reflect.Zero(v.Type())
+		}
+		ev := deepCopyValue(v.Elem(), memo)
+		nv := reflect.New(v.Type()).Elem()
+		nv.Set(ev)
+		return nv
+
+	case reflect.Struct:
+		nv := reflect.New(v.Type()).Elem()
+		for i := 0; i < v.NumField(); i++ {
+			sf := v.Field(i)
+			cf := deepCopyValue(sf, memo)
+			setValue(nv.Field(i), cf)
+		}
+		return nv
+
+	case reflect.Slice:
+		if v.IsNil() {
+			return reflect.Zero(v.Type())
+		}
+		nv := reflect.MakeSlice(v.Type(), v.Len(), v.Cap())
+		for i := 0; i < v.Len(); i++ {
+			nv.Index(i).Set(deepCopyValue(v.Index(i), memo))
+		}
+		return nv
+
+	case reflect.Array:
+		nv := reflect.New(v.Type()).Elem()
+		for i := 0; i < v.Len(); i++ {
+			nv.Index(i).Set(deepCopyValue(v.Index(i), memo))
+		}
+		return nv
+
+	case reflect.Map:
+		if v.IsNil() {
+			return reflect.Zero(v.Type())
+		}
+		nv := reflect.MakeMapWithSize(v.Type(), v.Len())
+		iter := v.MapRange()
+		for iter.Next() {
+			k := deepCopyValue(iter.Key(), memo)
+			val := deepCopyValue(iter.Value(), memo)
+			nv.SetMapIndex(k, val)
+		}
+		return nv
+
+	default:
+		return v
+	}
+}
+
+func setValue(dst, src reflect.Value) {
+	if dst.CanSet() {
+		dst.Set(src)
+		return
+	}
+	if dst.CanAddr() {
+		reflect.NewAt(dst.Type(), unsafe.Pointer(dst.UnsafeAddr())).Elem().Set(src)
+		return
+	}
+	panic(fmt.Sprintf("setValue: cannot set %s", dst.Type().String()))
 }
