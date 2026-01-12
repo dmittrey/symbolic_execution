@@ -58,6 +58,12 @@ type CallStackFrame struct {
 	Function    *ssa.Function
 	LocalMemory map[string]symbolic.SymbolicExpression
 	ReturnValue symbolic.SymbolicExpression
+
+	// To save place we should return after nested function
+	CallerBlock    *ssa.BasicBlock
+	CallerInstrIdx int
+	CallerPred     *ssa.BasicBlock
+	CallInstr      ssa.Value
 }
 
 func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, instrIdx int, pred *ssa.BasicBlock) []*Item {
@@ -76,6 +82,37 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 	switch i := instr.(type) {
 
 	case *ssa.Return:
+		// return to caller
+		if len(interpreter.CallStack) > 0 {
+			retVals := make([]symbolic.SymbolicExpression, len(i.Results))
+			for idx, v := range i.Results {
+				retVals[idx] = interpreter.resolveExpression(v)
+			}
+
+			var ret symbolic.SymbolicExpression
+			if len(retVals) == 0 {
+				ret = symbolic.NewNilConstant()
+			} else {
+				ret = retVals[0]
+			}
+
+			// pop frame
+			top := interpreter.CallStack[len(interpreter.CallStack)-1]
+			interpreter.CallStack = interpreter.CallStack[:len(interpreter.CallStack)-1]
+
+			// bind return value to call instruction in caller env
+			if top.CallInstr != nil {
+				interpreter.Env[top.CallInstr] = ret
+			}
+
+			// continue in caller at next instruction after call
+			if top.CallerBlock == nil {
+				return []*Item{{value: *interpreter, block: nil, instrIdx: -1}}
+			}
+			return []*Item{{value: *interpreter, block: top.CallerBlock, instrIdx: top.CallerInstrIdx, pred: top.CallerPred}}
+		}
+
+		// top-level return
 		interpreter.ReturnResults = make([]symbolic.SymbolicExpression, len(i.Results))
 		for idx, val := range i.Results {
 			interpreter.ReturnResults[idx] = interpreter.resolveExpression(val)
@@ -142,6 +179,50 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 		interpreter.Env[i] = phiVal
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 
+	case *ssa.Call:
+		// Take from resolveExpression
+		if _, ok := i.Call.Value.(*ssa.Builtin); ok {
+			interpreter.Env[i] = interpreter.resolveExpression(i)
+			return nextInSameBlock(*interpreter, block, instrIdx, pred)
+		}
+
+		// interprocedural analysis
+		if f, ok := i.Call.Value.(*ssa.Function); ok {
+			// SymVar if external
+			if f == nil || len(f.Blocks) == 0 {
+				stub := symbolic.NewSymbolicVariable("call_"+sanitizeName(i.String()), goTypeToSym(i.Type()))
+				interpreter.Env[i] = stub
+				return nextInSameBlock(*interpreter, block, instrIdx, pred)
+			}
+
+			frame := CallStackFrame{
+				Function:       f,
+				LocalMemory:    make(map[string]symbolic.SymbolicExpression),
+				CallerBlock:    block,
+				CallerInstrIdx: instrIdx + 1,
+				CallerPred:     pred,
+				CallInstr:      i,
+			}
+
+			// bind args -> callee params by name
+			for pi, p := range f.Params {
+				if pi >= len(i.Call.Args) {
+					break
+				}
+
+				argExpr := interpreter.resolveExpression(i.Call.Args[pi])
+
+				frame.LocalMemory[p.Name()] = argExpr
+			}
+
+			interpreter.CallStack = append(interpreter.CallStack, frame)
+
+			entry := f.Blocks[0]
+			return []*Item{{value: *interpreter, block: entry, instrIdx: 0, pred: nil}}
+		}
+
+		return nextInSameBlock(*interpreter, block, instrIdx, pred)
+
 	// Инструкции, которые также Value — будут резолвиться в resolveExpression
 	case *ssa.BinOp, *ssa.UnOp,
 		*ssa.FieldAddr, *ssa.IndexAddr,
@@ -169,7 +250,15 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	switch v := value.(type) {
 
 	case *ssa.Parameter:
-		// reuse
+		// Lookup in stack memory first
+		if len(interpreter.CallStack) > 0 {
+			for _, val := range interpreter.CallStack {
+				if bound, ok := val.LocalMemory[v.Name()]; ok {
+					return bound
+				}
+			}
+		}
+
 		if ref, ok := interpreter.paramRef[v]; ok {
 			// pointer param => address
 			if _, isPtr := v.Type().Underlying().(*types.Pointer); isPtr {
@@ -388,8 +477,9 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 			return stub
 		}
 
-		// остальные вызовы пока как HW5
-		panic("Support *ssa.Call (non-len builtin) in HW5!")
+		// fallback
+		stub := symbolic.NewSymbolicVariable("call_"+sanitizeName(v.String()), goTypeToSym(v.Type()))
+		return stub
 
 	default:
 		panic(fmt.Sprintf("Support me! %T", v))
