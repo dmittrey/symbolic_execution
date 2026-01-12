@@ -12,6 +12,24 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
+type LValueKind int
+
+const (
+	LVDirectRef   LValueKind = iota // обычный *Ref (скаляр/struct)
+	LVArrayElem                     // x[i]
+	LVStructField                   // obj.field
+)
+
+type LValue struct {
+	Kind  LValueKind
+	Base  *symbolic.Ref               // для DirectRef: сам ref; для ArrayElem/StructField: base-object
+	Index symbolic.SymbolicExpression // только для ArrayElem
+	Field int                         // только для StructField
+
+	// опционально: SSA тип для нормализации/диагностики
+	SsaType types.Type
+}
+
 type Interpreter struct {
 	CallStack     []CallStackFrame
 	Analyser      *Analyser
@@ -69,41 +87,8 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 	case *ssa.Store:
 		val := interpreter.resolveExpression(i.Val)
 
-		switch a := i.Addr.(type) {
-
-		case *ssa.FieldAddr:
-			// *(&obj.field) = val  => obj.field = val
-			base := interpreter.resolveExpression(a.X)
-			br, ok := base.(*symbolic.Ref)
-			if !ok {
-				panic(fmt.Sprintf("Store: FieldAddr base is %T, want *symbolic.Ref", base))
-			}
-			fr := interpreter.Heap.FieldAddress(br, a.Field)
-			interpreter.Heap.AssignValue(fr, val)
-
-		case *ssa.IndexAddr:
-			// *(&arr[i]) = val  => arr[i] = val
-			base := interpreter.resolveExpression(a.X)
-			br, ok := base.(*symbolic.Ref)
-			if !ok {
-				panic(fmt.Sprintf("Store: IndexAddr base is %T, want *symbolic.Ref", base))
-			}
-
-			idxExpr := interpreter.resolveExpression(a.Index)
-			if idxExpr.Type() != symbolic.IntType {
-				panic(fmt.Sprintf("Store: Index must be int, got %T (%s)", idxExpr, idxExpr.String()))
-			}
-			interpreter.Heap.AssignToArray(br, idxExpr, val)
-
-		default:
-			// обычное присваивание по адресу ref
-			addrExpr := interpreter.resolveExpression(i.Addr)
-			r, ok := addrExpr.(*symbolic.Ref)
-			if !ok {
-				panic(fmt.Sprintf("Store: Addr is %T, want *symbolic.Ref", addrExpr))
-			}
-			interpreter.Heap.AssignValue(r, val)
-		}
+		lv := interpreter.resolveAddr(i.Addr)
+		interpreter.store(lv, val)
 
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 
@@ -346,42 +331,8 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	case *ssa.UnOp:
 		// special-case load: *X
 		if v.Op == token.MUL {
-			// *(&obj.field)
-			if fa, ok := v.X.(*ssa.FieldAddr); ok {
-				base := interpreter.resolveExpression(fa.X)
-				br, ok := base.(*symbolic.Ref)
-				if !ok {
-					panic(fmt.Sprintf("Load: FieldAddr base is %T, want *symbolic.Ref", base))
-				}
-				fr := interpreter.Heap.FieldAddress(br, fa.Field)
-				return interpreter.Heap.GetValue(fr)
-			}
-
-			// *(&arr[i])
-			if ia, ok := v.X.(*ssa.IndexAddr); ok {
-				base := interpreter.resolveExpression(ia.X)
-				br, ok := base.(*symbolic.Ref)
-				if !ok {
-					panic(fmt.Sprintf("Load: IndexAddr base is %T, want *symbolic.Ref", base))
-				}
-
-				idxExpr := interpreter.resolveExpression(ia.Index)
-				if idxExpr.Type() != symbolic.IntType {
-					panic(fmt.Sprintf("Load: Index must be int, got %T (%s)", idxExpr, idxExpr.String()))
-				}
-				fmt.Printf("IndexAddr: base=%s, baseRefType=%s, dim=%d, baseType=%s\n",
-					br.String(), br.RefType.String(), br.ArrayDimension, br.ArrayBaseType.String())
-
-				return interpreter.Heap.GetFromArray(br, idxExpr)
-			}
-
-			// *ref (примитив или field-ref)
-			addrExpr := interpreter.resolveExpression(v.X)
-			r, ok := addrExpr.(*symbolic.Ref)
-			if !ok {
-				panic(fmt.Sprintf("Load: %T is not *symbolic.Ref", addrExpr))
-			}
-			return interpreter.Heap.GetValue(r)
+			lv := interpreter.resolveAddr(v.X)
+			return interpreter.load(lv)
 		}
 
 		operand := interpreter.resolveExpression(v.X)
@@ -573,4 +524,169 @@ func structMeta(t types.Type) (typeName string, fieldTypes []symbolic.Expression
 		typeName = "anon_struct"
 	}
 	return typeName, fieldTypes, true
+}
+
+func (it *Interpreter) resolveAddr(v ssa.Value) LValue {
+	switch a := v.(type) {
+
+	case *ssa.FieldAddr:
+		base := it.resolveExpression(a.X)
+		br, ok := base.(*symbolic.Ref)
+		if !ok {
+			panic("FieldAddr base not ref")
+		}
+		// важно: даже если br "не struct" по RefType — SSA скажет что это struct/*struct.
+		return LValue{Kind: LVStructField, Base: br, Field: a.Field, SsaType: a.Type()}
+
+	case *ssa.IndexAddr:
+		base := it.resolveExpression(a.X)
+		br, ok := base.(*symbolic.Ref)
+		if !ok {
+			panic("IndexAddr base not ref")
+		}
+
+		idx := it.resolveExpression(a.Index)
+		if idx.Type() != symbolic.IntType {
+			panic("Index must be int")
+		}
+
+		// ВОТ ТУТ — единственная нормализация по SSA типу:
+		br = it.normalizeIndexBaseToArrayRef(a.X, br)
+
+		return LValue{Kind: LVArrayElem, Base: br, Index: idx, SsaType: a.Type()}
+
+	default:
+		// обычный адрес: должен быть *symbolic.Ref
+		e := it.resolveExpression(v)
+		r, ok := e.(*symbolic.Ref)
+		if !ok {
+			panic(fmt.Sprintf("Addr is %T, want *Ref", e))
+		}
+		return LValue{Kind: LVDirectRef, Base: r, SsaType: v.Type()}
+	}
+}
+
+func (it *Interpreter) load(lv LValue) symbolic.SymbolicExpression {
+	switch lv.Kind {
+	case LVDirectRef:
+		return it.Heap.GetValue(lv.Base)
+
+	case LVStructField:
+		fr := it.Heap.FieldAddress(lv.Base, lv.Field)
+		return it.Heap.GetValue(fr)
+
+	case LVArrayElem:
+		return it.Heap.GetFromArray(lv.Base, lv.Index)
+
+	default:
+		panic("unknown lvalue kind")
+	}
+}
+
+func (it *Interpreter) store(lv LValue, val symbolic.SymbolicExpression) {
+	switch lv.Kind {
+	case LVDirectRef:
+		it.Heap.AssignValue(lv.Base, val)
+
+	case LVStructField:
+		fr := it.Heap.FieldAddress(lv.Base, lv.Field)
+		it.Heap.AssignValue(fr, val)
+
+	case LVArrayElem:
+		it.Heap.AssignToArray(lv.Base, lv.Index, val)
+
+	default:
+		panic("unknown lvalue kind")
+	}
+}
+
+// normalizeIndexBaseToArrayRef tries to "restore" array nature of base reference
+// using SSA type information. This fixes cases when base was resolved as a scalar
+// ref (e.g. bool) but is actually a slice/array.
+func (it *Interpreter) normalizeIndexBaseToArrayRef(x ssa.Value, br *symbolic.Ref) *symbolic.Ref {
+	if br == nil {
+		panic("normalizeIndexBaseToArrayRef: nil base ref")
+	}
+	// already OK
+	if br.RefType == symbolic.ArrayType {
+		return br
+	}
+
+	// Determine base container type from SSA.
+	// We prefer using existing helpers in this package: sliceDepthBase, structMeta, goTypeToSym.
+	t := x.Type()
+
+	// Slices: []T, [][]T, ...
+	if depth, base, ok := sliceDepthBase(t); ok {
+		// array dimension in your model:
+		// []T => dim=0, [][]T => dim=1, [][][]T => dim=2, ...
+		dim := depth - 1
+
+		// []struct only allowed for 1D
+		if typeName, fields, ok2 := structMeta(base); ok2 {
+			if depth != 1 {
+				panic("normalizeIndexBaseToArrayRef: multidimensional array of structs is not supported")
+			}
+			cp := *br
+			cp.RefType = symbolic.ArrayType
+			cp.ArrayDimension = 0
+			cp.ArrayBaseType = symbolic.StructType
+			cp.StructTypeName = typeName
+			cp.StructFieldIdx = -1
+			_ = fields // just to be explicit: memory type registration happens on Allocate/Param
+			return &cp
+		}
+
+		baseTy := goTypeToSym(base)
+
+		cp := *br
+		cp.RefType = symbolic.ArrayType
+		cp.ArrayDimension = dim
+		cp.ArrayBaseType = baseTy
+		cp.StructTypeName = ""
+		cp.StructFieldIdx = -1
+		return &cp
+	}
+
+	// Fixed-length arrays: [N]T (rare in your tests but harmless to support)
+	// Also handles pointers to arrays if they appear via x.Type().
+	tt := t
+	for {
+		if p, ok := tt.Underlying().(*types.Pointer); ok {
+			tt = p.Elem()
+			continue
+		}
+		break
+	}
+	if arr, ok := tt.Underlying().(*types.Array); ok {
+		base := arr.Elem()
+
+		if typeName, fields, ok2 := structMeta(base); ok2 {
+			// treat as 1D array of structs
+			cp := *br
+			cp.RefType = symbolic.ArrayType
+			cp.ArrayDimension = 0
+			cp.ArrayBaseType = symbolic.StructType
+			cp.StructTypeName = typeName
+			cp.StructFieldIdx = -1
+			_ = fields
+			return &cp
+		}
+
+		baseTy := goTypeToSym(base)
+
+		cp := *br
+		cp.RefType = symbolic.ArrayType
+		cp.ArrayDimension = 0
+		cp.ArrayBaseType = baseTy
+		cp.StructTypeName = ""
+		cp.StructFieldIdx = -1
+		return &cp
+	}
+
+	// If we got here, IndexAddr base is not an array-like type; keep as-is.
+	// Better to panic to catch unexpected SSA shapes:
+	panic(fmt.Sprintf("normalizeIndexBaseToArrayRef: base %s is not array-like (type=%s), baseRefType=%s",
+		x.String(), x.Type().String(), br.RefType.String(),
+	))
 }
