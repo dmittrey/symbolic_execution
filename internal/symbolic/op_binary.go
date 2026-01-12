@@ -9,7 +9,7 @@ type BinaryOperation struct {
 	Operator BinaryOperator
 }
 
-func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *BinaryOperation {
+func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) SymbolicExpression {
 	lt, rt := left.Type(), right.Type()
 
 	switch {
@@ -46,6 +46,15 @@ func NewBinaryOperation(left, right SymbolicExpression, op BinaryOperator) *Bina
 	case lt == NilType && rt == RefType &&
 		(op == EQ || op == NE):
 		return &BinaryOperation{Left: NewRef(0, right.(*Ref).RefType), Right: right.(*Ref).Idx, Operator: op}
+
+	// Арифметика указателей
+	case lt == RefType && rt == IntType &&
+		(op == ADD || op == SUB):
+		return left
+
+	case lt == IntType && rt == RefType &&
+		(op == ADD || op == SUB):
+		return right
 
 	case lt == NilType && rt == NilType &&
 		(op == EQ || op == NE):
