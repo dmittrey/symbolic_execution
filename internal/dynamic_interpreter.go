@@ -5,6 +5,8 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"reflect"
+	"unsafe"
 
 	"symbolic-execution-course/internal/memory"
 	"symbolic-execution-course/internal/symbolic"
@@ -58,6 +60,12 @@ type CallStackFrame struct {
 	Function    *ssa.Function
 	LocalMemory map[string]symbolic.SymbolicExpression
 	ReturnValue symbolic.SymbolicExpression
+
+	// To save place we should return after nested function
+	CallerBlock    *ssa.BasicBlock
+	CallerInstrIdx int
+	CallerPred     *ssa.BasicBlock
+	CallInstr      ssa.Value
 }
 
 func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, instrIdx int, pred *ssa.BasicBlock) []*Item {
@@ -76,6 +84,37 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 	switch i := instr.(type) {
 
 	case *ssa.Return:
+		// return to caller
+		if len(interpreter.CallStack) > 0 {
+			retVals := make([]symbolic.SymbolicExpression, len(i.Results))
+			for idx, v := range i.Results {
+				retVals[idx] = interpreter.resolveExpression(v)
+			}
+
+			var ret symbolic.SymbolicExpression
+			if len(retVals) == 0 {
+				ret = symbolic.NewNilConstant()
+			} else {
+				ret = retVals[0]
+			}
+
+			// pop frame
+			top := interpreter.CallStack[len(interpreter.CallStack)-1]
+			interpreter.CallStack = interpreter.CallStack[:len(interpreter.CallStack)-1]
+
+			// bind return value to call instruction in caller env
+			if top.CallInstr != nil {
+				interpreter.Env[top.CallInstr] = ret
+			}
+
+			// continue in caller at next instruction after call
+			if top.CallerBlock == nil {
+				return []*Item{{value: *interpreter, block: nil, instrIdx: -1}}
+			}
+			return []*Item{{value: *interpreter, block: top.CallerBlock, instrIdx: top.CallerInstrIdx, pred: top.CallerPred}}
+		}
+
+		// top-level return
 		interpreter.ReturnResults = make([]symbolic.SymbolicExpression, len(i.Results))
 		for idx, val := range i.Results {
 			interpreter.ReturnResults[idx] = interpreter.resolveExpression(val)
@@ -99,8 +138,16 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 
 	case *ssa.Jump:
 		out := make([]*Item, 0, len(block.Succs))
+		if len(block.Succs) <= 1 {
+			for _, s := range block.Succs {
+				out = append(out, &Item{value: *interpreter, block: s, instrIdx: 0, pred: block})
+			}
+			return out
+		}
+
 		for _, s := range block.Succs {
-			out = append(out, &Item{value: *interpreter, block: s, instrIdx: 0, pred: block})
+			st := interpreter.cloneMapsOnly()
+			out = append(out, &Item{value: st, block: s, instrIdx: 0, pred: block})
 		}
 		return out
 
@@ -142,6 +189,50 @@ func (interpreter *Interpreter) interpretDynamically(block *ssa.BasicBlock, inst
 		interpreter.Env[i] = phiVal
 		return nextInSameBlock(*interpreter, block, instrIdx, pred)
 
+	case *ssa.Call:
+		// Take from resolveExpression
+		if _, ok := i.Call.Value.(*ssa.Builtin); ok {
+			interpreter.Env[i] = interpreter.resolveExpression(i)
+			return nextInSameBlock(*interpreter, block, instrIdx, pred)
+		}
+
+		// interprocedural analysis
+		if f, ok := i.Call.Value.(*ssa.Function); ok {
+			// SymVar if external
+			if f == nil || len(f.Blocks) == 0 {
+				stub := symbolic.NewSymbolicVariable("call_"+sanitizeName(i.String()), goTypeToSym(i.Type()))
+				interpreter.Env[i] = stub
+				return nextInSameBlock(*interpreter, block, instrIdx, pred)
+			}
+
+			frame := CallStackFrame{
+				Function:       f,
+				LocalMemory:    make(map[string]symbolic.SymbolicExpression),
+				CallerBlock:    block,
+				CallerInstrIdx: instrIdx + 1,
+				CallerPred:     pred,
+				CallInstr:      i,
+			}
+
+			// bind args -> callee params by name
+			for pi, p := range f.Params {
+				if pi >= len(i.Call.Args) {
+					break
+				}
+
+				argExpr := interpreter.resolveExpression(i.Call.Args[pi])
+
+				frame.LocalMemory[p.Name()] = argExpr
+			}
+
+			interpreter.CallStack = append(interpreter.CallStack, frame)
+
+			entry := f.Blocks[0]
+			return []*Item{{value: *interpreter, block: entry, instrIdx: 0, pred: nil}}
+		}
+
+		return nextInSameBlock(*interpreter, block, instrIdx, pred)
+
 	// Инструкции, которые также Value — будут резолвиться в resolveExpression
 	case *ssa.BinOp, *ssa.UnOp,
 		*ssa.FieldAddr, *ssa.IndexAddr,
@@ -169,7 +260,15 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 	switch v := value.(type) {
 
 	case *ssa.Parameter:
-		// reuse
+		// Lookup in stack memory first
+		if len(interpreter.CallStack) > 0 {
+			for _, val := range interpreter.CallStack {
+				if bound, ok := val.LocalMemory[v.Name()]; ok {
+					return bound
+				}
+			}
+		}
+
 		if ref, ok := interpreter.paramRef[v]; ok {
 			// pointer param => address
 			if _, isPtr := v.Type().Underlying().(*types.Pointer); isPtr {
@@ -388,8 +487,9 @@ func (interpreter *Interpreter) resolveExpression(value ssa.Value) symbolic.Symb
 			return stub
 		}
 
-		// остальные вызовы пока как HW5
-		panic("Support *ssa.Call (non-len builtin) in HW5!")
+		// fallback
+		stub := symbolic.NewSymbolicVariable("call_"+sanitizeName(v.String()), goTypeToSym(v.Type()))
+		return stub
 
 	default:
 		panic(fmt.Sprintf("Support me! %T", v))
@@ -494,9 +594,19 @@ func nextInSameBlock(st Interpreter, block *ssa.BasicBlock, instrIdx int, pred *
 	if nxt < len(block.Instrs) {
 		return []*Item{{value: st, block: block, instrIdx: nxt, pred: pred}}
 	}
+
 	out := make([]*Item, 0, len(block.Succs))
+	if len(block.Succs) <= 1 {
+		for _, s := range block.Succs {
+			out = append(out, &Item{value: st, block: s, instrIdx: 0, pred: block})
+		}
+		return out
+	}
+
 	for _, s := range block.Succs {
-		out = append(out, &Item{value: st, block: s, instrIdx: 0, pred: block})
+		cp := st
+		cloned := (&cp).cloneMapsOnly()
+		out = append(out, &Item{value: cloned, block: s, instrIdx: 0, pred: block})
 	}
 	return out
 }
@@ -871,5 +981,130 @@ func (it *Interpreter) cloneMapsOnly() Interpreter {
 		cp.paramRef[k] = v
 	}
 
+	if it.CallStack != nil {
+		cp.CallStack = make([]CallStackFrame, len(it.CallStack))
+		for i := range it.CallStack {
+			cp.CallStack[i].Function = it.CallStack[i].Function
+			cp.CallStack[i].ReturnValue = it.CallStack[i].ReturnValue
+
+			if it.CallStack[i].LocalMemory != nil {
+				cp.CallStack[i].LocalMemory = make(map[string]symbolic.SymbolicExpression, len(it.CallStack[i].LocalMemory))
+				for k, v := range it.CallStack[i].LocalMemory {
+					cp.CallStack[i].LocalMemory[k] = v
+				}
+			} else {
+				cp.CallStack[i].LocalMemory = nil
+			}
+		}
+	} else {
+		cp.CallStack = nil
+	}
+
+	cp.Heap = cloneHeap(it.Heap)
+
 	return cp
+}
+
+func cloneHeap(h memory.Memory) memory.Memory {
+	if h == nil {
+		return nil
+	}
+	sm, ok := h.(*memory.SymbolicMemory)
+	if !ok {
+		panic(fmt.Sprintf("cloneHeap: unsupported heap type %T", h))
+	}
+	return deepCopyAny[*memory.SymbolicMemory](sm)
+}
+
+func deepCopyAny[T any](in T) T {
+	v := reflect.ValueOf(in)
+	if !v.IsValid() {
+		return in
+	}
+	cp := deepCopyValue(v, make(map[uintptr]reflect.Value))
+	return cp.Interface().(T)
+}
+
+func deepCopyValue(v reflect.Value, memo map[uintptr]reflect.Value) reflect.Value {
+	if !v.IsValid() {
+		return v
+	}
+
+	switch v.Kind() {
+	case reflect.Pointer:
+		if v.IsNil() {
+			return reflect.Zero(v.Type())
+		}
+		ptr := v.Pointer()
+		if got, ok := memo[ptr]; ok {
+			return got
+		}
+		nv := reflect.New(v.Elem().Type())
+		memo[ptr] = nv
+		nv.Elem().Set(deepCopyValue(v.Elem(), memo))
+		return nv
+
+	case reflect.Interface:
+		if v.IsNil() {
+			return reflect.Zero(v.Type())
+		}
+		ev := deepCopyValue(v.Elem(), memo)
+		nv := reflect.New(v.Type()).Elem()
+		nv.Set(ev)
+		return nv
+
+	case reflect.Struct:
+		nv := reflect.New(v.Type()).Elem()
+		for i := 0; i < v.NumField(); i++ {
+			sf := v.Field(i)
+			cf := deepCopyValue(sf, memo)
+			setValue(nv.Field(i), cf)
+		}
+		return nv
+
+	case reflect.Slice:
+		if v.IsNil() {
+			return reflect.Zero(v.Type())
+		}
+		nv := reflect.MakeSlice(v.Type(), v.Len(), v.Cap())
+		for i := 0; i < v.Len(); i++ {
+			nv.Index(i).Set(deepCopyValue(v.Index(i), memo))
+		}
+		return nv
+
+	case reflect.Array:
+		nv := reflect.New(v.Type()).Elem()
+		for i := 0; i < v.Len(); i++ {
+			nv.Index(i).Set(deepCopyValue(v.Index(i), memo))
+		}
+		return nv
+
+	case reflect.Map:
+		if v.IsNil() {
+			return reflect.Zero(v.Type())
+		}
+		nv := reflect.MakeMapWithSize(v.Type(), v.Len())
+		iter := v.MapRange()
+		for iter.Next() {
+			k := deepCopyValue(iter.Key(), memo)
+			val := deepCopyValue(iter.Value(), memo)
+			nv.SetMapIndex(k, val)
+		}
+		return nv
+
+	default:
+		return v
+	}
+}
+
+func setValue(dst, src reflect.Value) {
+	if dst.CanSet() {
+		dst.Set(src)
+		return
+	}
+	if dst.CanAddr() {
+		reflect.NewAt(dst.Type(), unsafe.Pointer(dst.UnsafeAddr())).Elem().Set(src)
+		return
+	}
+	panic(fmt.Sprintf("setValue: cannot set %s", dst.Type().String()))
 }
